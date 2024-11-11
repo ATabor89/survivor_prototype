@@ -3,12 +3,12 @@ mod resources;
 mod systems;
 mod menu;
 mod types;
-mod collision;
+mod physics;
 
-use crate::collision::{apply_movement_system, cleanup_system, damage_system, death_system, debug_visualization_system, enemy_movement_intent, physics_collision_system, projectile_physics_system, setup_physics_body, CollisionEvent};
 use crate::menu::{cleanup_menu, spawn_pause_menu, MenuPlugin};
+use crate::physics::{handle_collision_events, setup_physics_bodies, PhysicsPlugin};
 use crate::resources::{GameState, GameStats, SpawnTimer, UpgradePool, WaveConfig};
-use crate::systems::{combat_system, gameplay_movement_system, load_textures, projectile_movement, quit_game, spawn_enemies, spawn_player, universal_input_system};
+use crate::systems::{combat_system, death_system, enemy_movement, gameplay_movement_system, load_textures, quit_game, spawn_enemies, spawn_player, universal_input_system};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 
@@ -19,11 +19,11 @@ enum GameplaySets {
     Movement,
     Combat,
     Spawning,
+    Physics,
 }
 
 pub struct SurvivorsGamePlugin;
 
-// Update the plugin to use these sets and handle state transitions
 impl Plugin for SurvivorsGamePlugin {
     fn build(&self, app: &mut App) {
         app
@@ -36,18 +36,16 @@ impl Plugin for SurvivorsGamePlugin {
             // States
             .insert_state(GameState::Playing)
 
-            // Events
-            .add_event::<CollisionEvent>()
-
             // Startup systems
             .add_systems(Startup, (
                 load_textures,
                 spawn_player.after(load_textures),
             ))
 
-            // Gameplay systems in sets
+            // Configure system sets
             .configure_sets(Update, (
                 GameplaySets::Input,
+                GameplaySets::Physics,
                 GameplaySets::Movement,
                 GameplaySets::Combat,
                 GameplaySets::Spawning,
@@ -55,29 +53,28 @@ impl Plugin for SurvivorsGamePlugin {
 
             // Add systems to sets and run them only in Playing state
             .add_systems(Update, (
-                gameplay_movement_system
+                // Input
+                (gameplay_movement_system, enemy_movement)
                     .in_set(GameplaySets::Movement)
                     .run_if(in_state(GameState::Playing)),
+
+                // Physics and combat response
+                (
+                    setup_physics_bodies,
+                    (handle_collision_events, death_system).chain(),
+                )
+                    .in_set(GameplaySets::Physics)
+                    .run_if(in_state(GameState::Playing)),
+
+                // Spawning
                 spawn_enemies
                     .in_set(GameplaySets::Spawning)
                     .run_if(in_state(GameState::Playing)),
-                (combat_system, projectile_movement)
+
+                // Combat
+                combat_system
                     .in_set(GameplaySets::Combat)
                     .run_if(in_state(GameState::Playing)),
-                (
-                    setup_physics_body,
-                    enemy_movement_intent,
-                    physics_collision_system,
-                    projectile_physics_system,
-                    apply_movement_system,
-                    damage_system,
-                    death_system,
-                    cleanup_system,
-                    #[cfg(debug_assertions)]
-                    debug_visualization_system,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::Playing))
             ))
 
             // Menu-related systems
@@ -85,7 +82,6 @@ impl Plugin for SurvivorsGamePlugin {
             .add_systems(OnExit(GameState::Paused), cleanup_menu)
             .add_systems(OnEnter(GameState::Quit), quit_game)
             .add_systems(OnEnter(GameState::Settings), |mut next_state: ResMut<NextState<GameState>>| {
-                // Temporary handling until Settings is implemented
                 println!("Settings would be shown here");
                 next_state.set(GameState::Playing);
             })
@@ -103,6 +99,7 @@ fn main() {
             ..default()
         }))
         // .add_plugins(DefaultPlugins)
+        .add_plugins(PhysicsPlugin)
         .add_plugins(SurvivorsGamePlugin)
         .add_plugins(MenuPlugin)
         .run();

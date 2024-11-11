@@ -21,9 +21,6 @@ pub struct Projectile {
 }
 
 #[derive(Component)]
-pub struct Velocity(pub Vec2);
-
-#[derive(Component)]
 pub struct Health {
     pub current: f32,
     pub maximum: f32,

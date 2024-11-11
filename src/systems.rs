@@ -1,7 +1,8 @@
+use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile};
+use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::math::FloatOrd;
 use bevy::prelude::*;
-use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile, Velocity};
-use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
+use bevy_rapier2d::prelude::*;
 
 // Startup system to load textures and create atlas layouts
 pub fn load_textures(
@@ -195,7 +196,7 @@ pub fn spawn_enemies(
                 Vec3::new(
                     random_angle.cos() * spawn_distance,
                     random_angle.sin() * spawn_distance,
-                    0.0
+                    0.0,
                 );
 
             // Randomly select enemy variant (0 or 1)
@@ -245,7 +246,7 @@ pub fn combat_system(
                     FloatOrd((transform.translation - player_transform.translation).length())
                 }) {
                 let direction = (enemy_transform.translation - player_transform.translation).normalize();
-                let velocity = Vec2::new(direction.x, direction.y);
+                let velocity = Vect::new(direction.x, direction.y);
 
                 commands.spawn((
                     Projectile {
@@ -265,7 +266,12 @@ pub fn combat_system(
                         layout: game_textures.projectiles_layout.clone(),
                         index: 0,
                     },
-                    Velocity(velocity),
+                    RigidBody::Dynamic,
+                    Collider::ball(8.0),
+                    Sensor,
+                    ActiveEvents::COLLISION_EVENTS,
+                    CollisionGroups::new(Group::GROUP_3, Group::GROUP_2), // Projectile can hit enemies
+                    Velocity::linear(velocity * 300.0), // Set initial velocity
                 ));
 
                 combat.last_attack = time.elapsed_seconds();
@@ -274,16 +280,70 @@ pub fn combat_system(
     }
 }
 
-pub fn projectile_movement(
-    mut commands: Commands,
+// Update enemy movement using Rapier's velocity system
+pub fn enemy_movement(
     time: Res<Time>,
-    mut projectile_query: Query<(Entity, &Projectile, &mut Transform, &Velocity)>,
+    player_query: Query<&Transform, With<Player>>,
+    mut enemy_query: Query<(&Transform, &Enemy, &mut Velocity)>,
 ) {
-    for (entity, projectile, mut transform, velocity) in projectile_query.iter_mut() {
-        transform.translation += Vec3::new(velocity.0.x, velocity.0.y, 0.0) * projectile.speed * time.delta_seconds();
+    if let Ok(player_transform) = player_query.get_single() {
+        for (transform, enemy, mut velocity) in enemy_query.iter_mut() {
+            let direction = (player_transform.translation - transform.translation).normalize();
+            // Reduce speed slightly to make collisions more stable
+            velocity.linvel = direction.truncate() * enemy.speed * 0.8;
+        }
+    }
+}
 
-        // Despawn projectiles that have traveled too far
-        if transform.translation.length() > 1000.0 {
+pub fn death_system(
+    mut commands: Commands,
+    mut entity_query: ParamSet<(
+        Query<(Entity, &Health), With<Player>>,
+        Query<(Entity, &Health, &Enemy)>,
+    )>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut exp_query: Query<&mut Experience>,
+) {
+    // Check player death
+    if let Ok((player_entity, player_health)) = entity_query.p0().get_single() {
+        if player_health.current <= 0.0 {
+            info!("Player died!");
+            commands.entity(player_entity).despawn();
+            next_state.set(GameState::GameOver);
+            return;
+        }
+    }
+
+    // Check enemy deaths
+    let mut dead_enemies = Vec::new();
+    let mut total_exp = 0;
+
+    // Collect dead enemies and their experience
+    for (enemy_entity, enemy_health, enemy) in entity_query.p1().iter() {
+        if enemy_health.current <= 0.0 {
+            dead_enemies.push(enemy_entity);
+            total_exp += enemy.experience_value;
+            info!("Enemy died! Experience gained: {}", enemy.experience_value);
+        }
+    }
+
+    // Grant experience and despawn dead enemies
+    if !dead_enemies.is_empty() {
+        if let Ok(mut player_exp) = exp_query.get_single_mut() {
+            player_exp.current += total_exp;
+
+            // Level up check
+            let exp_needed = player_exp.level * 100;
+            if player_exp.current >= exp_needed {
+                info!("Level up! Current level: {}", player_exp.level + 1);
+                player_exp.current -= exp_needed;
+                player_exp.level += 1;
+                next_state.set(GameState::LevelUp);
+            }
+        }
+
+        // Despawn all dead enemies
+        for entity in dead_enemies {
             commands.entity(entity).despawn();
         }
     }
