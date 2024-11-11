@@ -229,19 +229,6 @@ pub fn spawn_enemies(
     }
 }
 
-pub fn enemy_movement(
-    time: Res<Time>,
-    player_query: Query<&Transform, With<Player>>,
-    mut enemy_query: Query<(&Enemy, &mut Transform), Without<Player>>,
-) {
-    let player_transform = player_query.single();
-
-    for (enemy, mut enemy_transform) in enemy_query.iter_mut() {
-        let direction = (player_transform.translation - enemy_transform.translation).normalize();
-        enemy_transform.translation += direction * enemy.speed * time.delta_seconds();
-    }
-}
-
 // Combat system updated similarly with new sprite handling
 pub fn combat_system(
     mut commands: Commands,

@@ -52,3 +52,13 @@ pub struct PlayerStats {
     pub defense: f32,
     pub luck: f32,
 }
+
+// Physics-related components
+#[derive(Component, Default)]
+pub struct IntendedMovement(pub Vec3);
+
+#[derive(Component, Default)]
+pub struct PhysicsBody {
+    pub radius: f32,
+    pub mass: f32,
+}
