@@ -2,6 +2,7 @@ use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile};
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::math::FloatOrd;
 use bevy::prelude::*;
+use bevy::utils::HashSet;
 use bevy_rapier2d::prelude::*;
 
 // Startup system to load textures and create atlas layouts
@@ -172,6 +173,11 @@ pub fn spawn_player(
             current: 0,
             level: 1,
         },
+        // Add Health component here
+        Health {
+            current: 100.0,
+            maximum: 100.0,
+        },
     ));
 
     commands.spawn(Camera2dBundle::default());
@@ -188,7 +194,11 @@ pub fn spawn_enemies(
 ) {
     if timer.0.tick(time.delta()).just_finished() {
         if enemy_query.iter().count() < wave_config.max_enemies as usize {
-            let player_transform = player_query.single();
+            // Use get_single() instead of single() to handle missing player gracefully
+            let player_transform = match player_query.get_single() {
+                Ok(transform) => transform,
+                Err(_) => return, // If no player exists, just return
+            };
 
             let spawn_distance = 400.0;
             let random_angle = rand::random::<f32>() * std::f32::consts::TAU;
@@ -199,7 +209,6 @@ pub fn spawn_enemies(
                     0.0,
                 );
 
-            // Randomly select enemy variant (0 or 1)
             let sprite_index = if rand::random::<f32>() > 0.5 { 0 } else { 1 };
 
             commands.spawn((
@@ -314,25 +323,25 @@ pub fn death_system(
         }
     }
 
-    // Check enemy deaths
-    let mut dead_enemies = Vec::new();
+    // Track entities marked for death to ensure we only process them once
+    let mut dead_enemies: HashSet<Entity> = HashSet::new();
     let mut total_exp = 0;
 
-    // Collect dead enemies and their experience
-    for (enemy_entity, enemy_health, enemy) in entity_query.p1().iter() {
-        if enemy_health.current <= 0.0 {
-            dead_enemies.push(enemy_entity);
+    // Collect dead enemies
+    for (enemy_entity, health, enemy) in entity_query.p1().iter() {
+        if health.current <= 0.0 && !dead_enemies.contains(&enemy_entity) {
+            dead_enemies.insert(enemy_entity);
             total_exp += enemy.experience_value;
             info!("Enemy died! Experience gained: {}", enemy.experience_value);
         }
     }
 
-    // Grant experience and despawn dead enemies
+    // Handle experience and despawning
     if !dead_enemies.is_empty() {
+        // Grant experience
         if let Ok(mut player_exp) = exp_query.get_single_mut() {
             player_exp.current += total_exp;
 
-            // Level up check
             let exp_needed = player_exp.level * 100;
             if player_exp.current >= exp_needed {
                 info!("Level up! Current level: {}", player_exp.level + 1);
@@ -342,7 +351,7 @@ pub fn death_system(
             }
         }
 
-        // Despawn all dead enemies
+        // Despawn dead enemies
         for entity in dead_enemies {
             commands.entity(entity).despawn();
         }

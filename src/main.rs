@@ -4,6 +4,7 @@ mod systems;
 mod menu;
 mod types;
 mod physics;
+mod ui;
 
 use crate::menu::{cleanup_menu, spawn_pause_menu, MenuPlugin};
 use crate::physics::{handle_collision_events, setup_physics_bodies, PhysicsPlugin};
@@ -11,11 +12,13 @@ use crate::resources::{GameState, GameStats, SpawnTimer, UpgradePool, WaveConfig
 use crate::systems::{combat_system, death_system, enemy_movement, gameplay_movement_system, load_textures, quit_game, spawn_enemies, spawn_player, universal_input_system};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
+use crate::ui::{cleanup_ui, spawn_ui, update_health_ui};
 
 // First, let's organize our systems into sets for better control
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum GameplaySets {
     Input,
+    UI,
     Movement,
     Combat,
     Spawning,
@@ -45,6 +48,7 @@ impl Plugin for SurvivorsGamePlugin {
             // Configure system sets
             .configure_sets(Update, (
                 GameplaySets::Input,
+                GameplaySets::UI,
                 GameplaySets::Physics,
                 GameplaySets::Movement,
                 GameplaySets::Combat,
@@ -76,6 +80,13 @@ impl Plugin for SurvivorsGamePlugin {
                     .in_set(GameplaySets::Combat)
                     .run_if(in_state(GameState::Playing)),
             ))
+            
+            // UI-related systems
+            .add_systems(OnEnter(GameState::Playing), spawn_ui.in_set(GameplaySets::UI))
+            .add_systems(OnExit(GameState::Playing), cleanup_ui)
+            .add_systems(Update, update_health_ui
+                .in_set(GameplaySets::UI)
+                .run_if(in_state(GameState::Playing)))
 
             // Menu-related systems
             .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
