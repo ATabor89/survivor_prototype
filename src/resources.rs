@@ -22,6 +22,9 @@ pub struct GameStats {
     pub victory_threshold: u32,
 }
 
+#[derive(Resource, Default)]
+pub struct LastDamageTime(pub f32);
+
 #[derive(Resource)]
 pub struct SpawnTimer(pub Timer);
 

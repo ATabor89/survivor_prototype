@@ -39,8 +39,8 @@ pub fn spawn_ui(mut commands: Commands) {
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                border_color: BorderColor(Color::rgb(0.7, 0.7, 0.7)),
-                background_color: BackgroundColor(Color::rgb(0.1, 0.1, 0.1)),
+                border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
                 ..default()
             })
                 .with_children(|parent| {
@@ -52,7 +52,7 @@ pub fn spawn_ui(mut commands: Commands) {
                                 height: Val::Percent(100.0),
                                 ..default()
                             },
-                            background_color: BackgroundColor(Color::rgb(0.8, 0.2, 0.2)),
+                            background_color: BackgroundColor(Color::srgb(0.8, 0.2, 0.2)),
                             ..default()
                         },
                         HealthBar,
