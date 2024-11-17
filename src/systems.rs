@@ -86,21 +86,6 @@ pub fn gameplay_movement_system(
     }
 }
 
-pub fn menu_input_system(
-    game_state: Res<State<GameState>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    // Only process menu inputs in MainMenu state
-    if *game_state.get() != GameState::MainMenu {
-        return;
-    }
-
-    if keyboard.just_pressed(KeyCode::Enter) {
-        next_state.set(GameState::Playing);
-    }
-}
-
 pub fn universal_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     game_state: Res<State<GameState>>,
@@ -110,10 +95,32 @@ pub fn universal_input_system(
         match *game_state.get() {
             GameState::Playing => next_state.set(GameState::Paused),
             GameState::Paused => next_state.set(GameState::Playing),
-            GameState::Settings => next_state.set(GameState::Playing), // Return to game from settings
+            GameState::Settings => next_state.set(GameState::Playing),
             GameState::MainMenu => next_state.set(GameState::Quit),
             _ => {}
         }
+    }
+}
+
+pub fn handle_pause_state(
+    mut rapier_config: ResMut<RapierConfiguration>,
+    mut time: ResMut<Time<Virtual>>,
+    game_state: Res<State<GameState>>,
+) {
+    match game_state.get() {
+        GameState::Paused => {
+            // Pause physics
+            rapier_config.physics_pipeline_active = false;
+            // Pause virtual time
+            time.pause();
+        }
+        GameState::Playing => {
+            // Resume physics
+            rapier_config.physics_pipeline_active = true;
+            // Resume virtual time
+            time.unpause();
+        }
+        _ => {}
     }
 }
 
@@ -123,22 +130,6 @@ enum InputSet {
     Universal,
     Menu,
     Gameplay,
-}
-
-// Schedule systems based on their requirements
-pub fn build_input_schedule(app: &mut App) {
-    app
-        .add_systems(Update, (
-            universal_input_system,
-            menu_input_system,
-            gameplay_movement_system,
-        ).chain())
-        // Optional: Use set configuration for more control
-        .configure_sets(Update, (
-            InputSet::Universal,
-            InputSet::Menu,
-            InputSet::Gameplay,
-        ).chain());
 }
 
 pub fn spawn_player(
@@ -166,7 +157,7 @@ pub fn spawn_player(
         },
         Combat {
             attack_damage: 10.0,
-            attack_speed: 1.0,
+            attack_speed: 0.60,
             last_attack: 0.0,
         },
         Experience {
@@ -186,64 +177,61 @@ pub fn spawn_player(
 pub fn spawn_enemies(
     mut commands: Commands,
     game_textures: Res<GameTextures>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut timer: ResMut<SpawnTimer>,
     wave_config: Res<WaveConfig>,
     enemy_query: Query<&Enemy>,
     player_query: Query<&Transform, With<Player>>,
 ) {
-    if timer.0.tick(time.delta()).just_finished() {
-        if enemy_query.iter().count() < wave_config.max_enemies as usize {
-            // Use get_single() instead of single() to handle missing player gracefully
-            let player_transform = match player_query.get_single() {
-                Ok(transform) => transform,
-                Err(_) => return, // If no player exists, just return
-            };
+    if timer.0.tick(time.delta()).just_finished() && enemy_query.iter().count() < wave_config.max_enemies as usize {
+        // Use get_single() instead of single() to handle missing player gracefully
+        let player_transform = match player_query.get_single() {
+            Ok(transform) => transform,
+            Err(_) => return, // If no player exists, just return
+        };
 
-            let spawn_distance = 400.0;
-            let random_angle = rand::random::<f32>() * std::f32::consts::TAU;
-            let spawn_position = player_transform.translation +
-                Vec3::new(
-                    random_angle.cos() * spawn_distance,
-                    random_angle.sin() * spawn_distance,
-                    0.0,
-                );
+        let spawn_distance = 400.0;
+        let random_angle = rand::random::<f32>() * std::f32::consts::TAU;
+        let spawn_position = player_transform.translation +
+            Vec3::new(
+                random_angle.cos() * spawn_distance,
+                random_angle.sin() * spawn_distance,
+                0.0,
+            );
 
-            let sprite_index = if rand::random::<f32>() > 0.5 { 0 } else { 1 };
+        let sprite_index = if rand::random::<f32>() > 0.5 { 0 } else { 1 };
 
-            commands.spawn((
-                Enemy {
-                    health: 50.0,
-                    speed: 100.0,
-                    experience_value: 10,
-                },
-                SpriteBundle {
-                    texture: game_textures.enemies.clone(),
-                    sprite: Sprite {
-                        custom_size: Some(Vec2::new(32.0, 32.0)),
-                        ..default()
-                    },
-                    transform: Transform::from_translation(spawn_position),
+        commands.spawn((
+            Enemy {
+                health: 50.0,
+                speed: 100.0,
+                experience_value: 10,
+            },
+            SpriteBundle {
+                texture: game_textures.enemies.clone(),
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(32.0, 32.0)),
                     ..default()
                 },
-                TextureAtlas {
-                    layout: game_textures.enemies_layout.clone(),
-                    index: sprite_index,
-                },
-                Health {
-                    current: 50.0,
-                    maximum: 50.0,
-                },
-            ));
-        }
+                transform: Transform::from_translation(spawn_position),
+                ..default()
+            },
+            TextureAtlas {
+                layout: game_textures.enemies_layout.clone(),
+                index: sprite_index,
+            },
+            Health {
+                current: 50.0,
+                maximum: 50.0,
+            },
+        ));
     }
 }
 
-// Combat system updated similarly with new sprite handling
 pub fn combat_system(
     mut commands: Commands,
     game_textures: Res<GameTextures>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut player_query: Query<(&Transform, &mut Combat), With<Player>>,
     enemy_query: Query<(Entity, &Transform), With<Enemy>>,
 ) {
@@ -277,10 +265,11 @@ pub fn combat_system(
                     },
                     RigidBody::Dynamic,
                     Collider::ball(8.0),
-                    Sensor,
+                    LockedAxes::ROTATION_LOCKED,
                     ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(Group::GROUP_3, Group::GROUP_2), // Projectile can hit enemies
-                    Velocity::linear(velocity * 300.0), // Set initial velocity
+                    CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
+                    Velocity::linear(velocity * 300.0),
+                    Dominance::group(5),
                 ));
 
                 combat.last_attack = time.elapsed_seconds();

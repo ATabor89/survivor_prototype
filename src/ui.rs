@@ -11,6 +11,9 @@ pub struct HealthBar;
 #[derive(Component)]
 pub struct HealthText;
 
+#[derive(Component)]
+pub struct GameTimer;
+
 pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
     commands
@@ -25,7 +28,7 @@ pub fn spawn_ui(mut commands: Commands) {
                 },
                 ..default()
             },
-            GameUI, // Add marker component
+            GameUI,
         ))
         .with_children(|parent| {
             // Health bar container
@@ -74,6 +77,30 @@ pub fn spawn_ui(mut commands: Commands) {
                     }),
                 HealthText,
             ));
+
+            // Game Timer
+            parent.spawn((
+                TextBundle::from_section(
+                    "00:00",
+                    TextStyle {
+                        font_size: 32.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                )
+                    .with_style(Style {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(50.0),
+                        top: Val::Px(10.0),
+                        // Center the text horizontally
+                        margin: UiRect {
+                            left: Val::Px(-40.0), // Approximately half the text width
+                            ..default()
+                        },
+                        ..default()
+                    }),
+                GameTimer,
+            ));
         });
 }
 
@@ -83,6 +110,18 @@ pub fn cleanup_ui(
 ) {
     for entity in ui_query.iter() {
         commands.entity(entity).despawn_recursive();
+    }
+}
+
+pub fn update_game_timer(
+    time: Res<Time<Virtual>>,
+    mut timer_query: Query<&mut Text, With<GameTimer>>,
+) {
+    if let Ok(mut text) = timer_query.get_single_mut() {
+        let total_secs = time.elapsed_seconds() as u32;
+        let minutes = total_secs / 60;
+        let seconds = total_secs % 60;
+        text.sections[0].value = format!("{:02}:{:02}", minutes, seconds);
     }
 }
 

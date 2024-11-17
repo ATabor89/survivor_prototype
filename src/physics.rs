@@ -7,6 +7,10 @@ use bevy_rapier2d::rapier::geometry::CollisionEventFlags;
 
 pub struct PhysicsPlugin;
 
+// A component to mark our damage sensor
+#[derive(Component)]
+pub struct DamageSensor;
+
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         // Base physics setup with custom configuration
@@ -30,42 +34,12 @@ impl Plugin for PhysicsPlugin {
             app.add_plugins(RapierDebugRenderPlugin::default());
         }
 
-        app.add_systems(Update, (
-            setup_physics_bodies,
-            handle_collision_events,
-        )
-            .chain()
-            .run_if(in_state(GameState::Playing)));
-    }
-}
-
-pub fn maintain_separation(
-    mut query_set: ParamSet<(
-        Query<&Transform, With<Player>>,
-        Query<&mut Transform, With<Enemy>>
-    )>,
-) {
-    // First get the player position
-    let player_pos = if let Ok(player_transform) = query_set.p0().get_single() {
-        player_transform.translation
-    } else {
-        return;
-    };
-
-    // Then handle enemy positions
-    for mut enemy_transform in query_set.p1().iter_mut() {
-        let diff = enemy_transform.translation - player_pos;
-        let distance = diff.length();
-
-        // Get the combined radius of both colliders (assuming they're circles)
-        let min_distance = 32.0; // Combined radius of player and enemy
-
-        if distance < min_distance && distance > 0.0 {
-            // Calculate separation vector
-            let separation = diff.normalize() * (min_distance - distance);
-            // Move enemy away to maintain minimum distance
-            enemy_transform.translation += separation;
-        }
+        app.add_systems(
+            Update,
+            (setup_physics_bodies, handle_collision_events)
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+        );
     }
 }
 
@@ -79,6 +53,7 @@ pub fn setup_physics_bodies(
     let player_group = Group::GROUP_1;
     let enemy_group = Group::GROUP_2;
     let projectile_group = Group::GROUP_3;
+    let sensor_group = Group::GROUP_4;
 
     // info!("Setting up physics bodies");
 
@@ -86,17 +61,32 @@ pub fn setup_physics_bodies(
     for entity in new_players.iter() {
         info!("Setting up player entity: {:?}", entity);
         if commands.get_entity(entity).is_some() {
-            commands.entity(entity).insert((
-                RigidBody::KinematicPositionBased,
-                Collider::ball(16.0),
-                Velocity::zero(),
-                LockedAxes::ROTATION_LOCKED,
-                ActiveEvents::COLLISION_EVENTS,
-                CollisionGroups::new(player_group, enemy_group),
-                Friction::coefficient(0.0),
-                Restitution::coefficient(0.5),
-                Dominance::group(10),
-            ));
+            commands.entity(entity)
+                .insert((
+                    RigidBody::KinematicPositionBased,
+                    Collider::ball(12.0),
+                    Velocity::zero(),
+                    LockedAxes::ROTATION_LOCKED,
+                    ActiveEvents::COLLISION_EVENTS,
+                    CollisionGroups::new(player_group, enemy_group),
+                    Friction::coefficient(0.0),
+                    Restitution::coefficient(0.5),
+                    Dominance::group(10),
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        DamageSensor,
+                        Collider::ball(16.0),
+                        Sensor,
+                        ActiveEvents::COLLISION_EVENTS,
+                        // Key change: Make sure sensor can detect enemies and enemies can detect sensor
+                        CollisionGroups {
+                            memberships: sensor_group,
+                            filters: enemy_group,
+                        },
+                        TransformBundle::default(),
+                    ));
+                });
         }
     }
 
@@ -106,7 +96,7 @@ pub fn setup_physics_bodies(
         if commands.get_entity(entity).is_some() {
             commands.entity(entity).insert((
                 RigidBody::Dynamic,
-                Collider::ball(16.0),
+                Collider::ball(12.0),
                 Velocity::zero(),
                 LockedAxes::ROTATION_LOCKED,
                 Damping {
@@ -114,10 +104,11 @@ pub fn setup_physics_bodies(
                     angular_damping: 1.0,
                 },
                 ActiveEvents::COLLISION_EVENTS,
-                CollisionGroups::new(
-                    enemy_group,
-                    player_group | enemy_group | projectile_group,
-                ),
+                // Key change: Make sure enemies can detect sensors
+                CollisionGroups {
+                    memberships: enemy_group,
+                    filters: player_group | enemy_group | projectile_group | sensor_group,
+                },
                 ColliderMassProperties::Density(1.0),
                 Friction::coefficient(0.0),
                 Restitution::coefficient(0.5),
@@ -150,73 +141,118 @@ pub fn handle_collision_events(
     player_query: Query<Entity, With<Player>>,
     mut health_query: Query<&mut Health>,
     enemy_query: Query<Entity, With<Enemy>>,
+    damage_sensor_query: Query<(Entity, &Parent), With<DamageSensor>>,
     projectile_query: Query<(Entity, &Projectile)>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
 ) {
     let mut enemy_collisions = HashSet::new();
     let mut processed_projectiles = HashSet::new();
 
-    // Get player entity
-    let player_entity = match player_query.get_single() {
-        Ok(entity) => entity,
-        Err(_) => return,
+    // Get the player entity
+    let player_entity = if let Ok(entity) = player_query.get_single() {
+        entity
+    } else {
+        return;
     };
 
-    // Process all collisions first
+    info!("Processing {} collision events", collision_events.len());
+
+    // Process all collision events
     for event in collision_events.read() {
         match event {
-            CollisionEvent::Started(e1, e2, _) => {
-                // Handle player-enemy collisions
-                if (*e1 == player_entity && enemy_query.contains(*e2)) {
-                    enemy_collisions.insert(*e2);
-                } else if (*e2 == player_entity && enemy_query.contains(*e1)) {
-                    enemy_collisions.insert(*e1);
-                }
+            CollisionEvent::Started(e1, e2, flags) => {
+                info!(
+                    "Collision started between {:?} and {:?} with flags {:?}",
+                    e1, e2, flags
+                );
 
-                // Handle projectile-enemy collisions
-                let proj_entity = if projectile_query.contains(*e1) { Some(*e1) }
-                else if projectile_query.contains(*e2) { Some(*e2) }
-                else { None };
+                // Handle damage sensor collisions
+                if flags.contains(CollisionEventFlags::SENSOR) {
+                    info!("Sensor collision detected");
+                    // Check if either entity is our damage sensor
+                    if let Some((sensor_entity, parent)) = damage_sensor_query
+                        .iter()
+                        .find(|(sensor, _)| *sensor == *e1 || *sensor == *e2)
+                    {
+                        info!("Found damage sensor collision");
 
-                let enemy_entity = if enemy_query.contains(*e1) { Some(*e1) }
-                else if enemy_query.contains(*e2) { Some(*e2) }
-                else { None };
-
-                if let (Some(proj), Some(enemy)) = (proj_entity, enemy_entity) {
-                    if !processed_projectiles.contains(&proj) {
-                        processed_projectiles.insert(proj);
-
-                        // Get enemy health and apply damage
-                        if let Ok(mut enemy_health) = health_query.get_mut(enemy) {
-                            enemy_health.current -= 15.0;
-                            info!("Enemy hit! Health remaining: {}", enemy_health.current);
-
-                            // If enemy dies, despawn it
-                            if enemy_health.current <= 0.0 {
-                                commands.entity(enemy).despawn();
-                                info!("Enemy killed!");
+                        // If the parent is our player and the other entity is an enemy
+                        if parent.get() == player_entity {
+                            let other_entity = if *e1 == sensor_entity { *e2 } else { *e1 };
+                            if enemy_query.contains(other_entity) {
+                                info!("Adding enemy to collision set");
+                                enemy_collisions.insert(other_entity);
                             }
                         }
+                    }
+                } else {
+                    // Handle projectile collisions
+                    let proj_entity = if projectile_query.contains(*e1) {
+                        Some(*e1)
+                    } else if projectile_query.contains(*e2) {
+                        Some(*e2)
+                    } else {
+                        None
+                    };
 
-                        // Always despawn the projectile
-                        commands.entity(proj).despawn();
-                        info!("Projectile despawned");
+                    let enemy_entity = if enemy_query.contains(*e1) {
+                        Some(*e1)
+                    } else if enemy_query.contains(*e2) {
+                        Some(*e2)
+                    } else {
+                        None
+                    };
+
+                    if let (Some(proj), Some(enemy)) = (proj_entity, enemy_entity) {
+                        if !processed_projectiles.contains(&proj) {
+                            processed_projectiles.insert(proj);
+
+                            if let Ok(mut enemy_health) = health_query.get_mut(enemy) {
+                                enemy_health.current -= 25.0;
+                                info!("Enemy hit! Health remaining: {}", enemy_health.current);
+
+                                if enemy_health.current <= 0.0 {
+                                    commands.entity(enemy).despawn();
+                                    info!("Enemy killed!");
+                                }
+                            }
+
+                            commands.entity(proj).despawn();
+                            info!("Projectile despawned");
+                        }
                     }
                 }
             }
-            CollisionEvent::Stopped(_, _, _) => {},
+            CollisionEvent::Stopped(e1, e2, flags) => {
+                info!(
+                    "Collision stopped between {:?} and {:?} with flags {:?}",
+                    e1, e2, flags
+                );
+            }
         }
     }
 
-    // Apply player damage if we have enemy collisions
+    // Debug: Print collision set size
+    if !enemy_collisions.is_empty() {
+        info!(
+            "Found {} enemy collisions this frame",
+            enemy_collisions.len()
+        );
+    }
+
+    // Apply damage if we have enemy collisions
     if !enemy_collisions.is_empty() {
         if let Ok(mut health) = health_query.get_mut(player_entity) {
             let time_since_last_tick = time.elapsed_seconds() % 0.25;
             if time_since_last_tick < time.delta_seconds() {
                 let damage = 5.0 * enemy_collisions.len() as f32;
                 health.current -= damage;
-                info!("Player took {} damage from {} enemies! Health: {}", 
-                      damage, enemy_collisions.len(), health.current);
+                info!(
+                    "Player took {} damage from {} enemies! Health: {}",
+                    damage,
+                    enemy_collisions.len(),
+                    health.current
+                );
             }
         }
     }
@@ -261,9 +297,7 @@ fn is_enemy_enemy_collision(
     enemy_query.contains(entity1) && enemy_query.contains(entity2)
 }
 
-pub fn enemy_pushback(
-    mut enemy_query: Query<(Entity, &Transform, &mut Velocity), With<Enemy>>,
-) {
+pub fn enemy_pushback(mut enemy_query: Query<(Entity, &Transform, &mut Velocity), With<Enemy>>) {
     // Collect enemy positions first to avoid borrow checker issues
     let enemies: Vec<(Entity, Vec3)> = enemy_query
         .iter()
@@ -282,7 +316,8 @@ pub fn enemy_pushback(
             let diff = transform_a.translation - *transform_b;
             let dist = diff.length();
 
-            if dist < 32.0 && dist > 0.0 {  // 32.0 is double the enemy radius
+            if dist < 32.0 && dist > 0.0 {
+                // 32.0 is double the enemy radius
                 push += diff.truncate().normalize() * (1.0 - dist / 32.0) * 50.0;
             }
         }
