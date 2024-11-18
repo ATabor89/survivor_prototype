@@ -1,5 +1,5 @@
-use crate::components::{Enemy, Health, Player, Projectile};
-use crate::resources::{GameState, LastDamageTime};
+use crate::components::{Enemy, Health, MarkedForDespawn, Player, Projectile};
+use crate::resources::{GameState, GameStats, LastDamageTime};
 use bevy::prelude::*;
 use bevy::utils::HashSet;
 use bevy_rapier2d::prelude::*;
@@ -51,6 +51,7 @@ pub fn setup_physics_bodies(
     let player_group = Group::GROUP_1;
     let enemy_group = Group::GROUP_2;
     let projectile_group = Group::GROUP_3;
+    let experience_group = Group::GROUP_4;
 
     // Player setup
     for entity in new_players.iter() {
@@ -61,7 +62,7 @@ pub fn setup_physics_bodies(
                     RigidBody::KinematicPositionBased,
                     Collider::ball(12.0),
                     ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(player_group, enemy_group),
+                    CollisionGroups::new(player_group, enemy_group | experience_group),
                     Velocity::zero(),
                     LockedAxes::ROTATION_LOCKED,
                 ))
@@ -116,7 +117,7 @@ pub fn handle_collision_events(
     mut commands: Commands,
     player_query: Query<Entity, With<Player>>,
     mut health_query: Query<&mut Health>,
-    enemy_query: Query<Entity, With<Enemy>>,
+    enemy_query: Query<Entity, (With<Enemy>, Without<MarkedForDespawn>)>,
     damage_sensor_query: Query<(Entity, &Parent), With<DamageSensor>>,
     projectile_query: Query<(Entity, &Projectile)>,
     time: Res<Time<Virtual>>,
@@ -138,6 +139,7 @@ pub fn handle_collision_events(
 
     // Handle projectile collisions
     let mut processed_projectiles = HashSet::new();
+    let mut marked_enemies = HashSet::new(); // Track enemies marked in this frame
 
     for event in collision_events.read() {
         if let CollisionEvent::Started(e1, e2, _) = event {
@@ -158,6 +160,11 @@ pub fn handle_collision_events(
             };
 
             if let (Some(proj), Some(enemy)) = (proj_entity, enemy_entity) {
+                // Skip if we've already marked this enemy for death in this frame
+                if marked_enemies.contains(&enemy) {
+                    continue;
+                }
+
                 if !processed_projectiles.contains(&proj) {
                     processed_projectiles.insert(proj);
 
@@ -166,8 +173,10 @@ pub fn handle_collision_events(
                         info!("Enemy hit! Health: {}", enemy_health.current);
 
                         if enemy_health.current <= 0.0 {
-                            commands.entity(enemy).despawn();
-                            info!("Enemy killed!");
+                            // Mark for death instead of immediate despawn
+                            commands.entity(enemy).insert(MarkedForDespawn);
+                            marked_enemies.insert(enemy);
+                            info!("Enemy marked for death!");
                         }
                     }
 
@@ -201,7 +210,7 @@ pub fn handle_collision_events(
         let current_time = time.elapsed_seconds();
         if current_time - last_damage.0 >= 0.25 {
             if let Ok(mut health) = health_query.get_mut(player_entity) {
-                let damage = 5.0 * intersecting_enemies as f32;
+                let damage = 1.0 * intersecting_enemies as f32;
                 health.current -= damage;
                 last_damage.0 = current_time;
                 info!(

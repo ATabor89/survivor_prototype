@@ -1,5 +1,6 @@
 use crate::components::{Health, Player};
 use bevy::prelude::*;
+use crate::resources::GameStats;
 
 // Root node marker
 #[derive(Component)]
@@ -13,6 +14,9 @@ pub struct HealthText;
 
 #[derive(Component)]
 pub struct GameTimer;
+
+#[derive(Component)]
+pub struct KillCounter;
 
 pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
@@ -32,17 +36,18 @@ pub fn spawn_ui(mut commands: Commands) {
         ))
         .with_children(|parent| {
             // Health bar container
-            parent.spawn(NodeBundle {
-                style: Style {
-                    width: Val::Px(200.0),
-                    height: Val::Px(30.0),
-                    border: UiRect::all(Val::Px(2.0)),
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Px(200.0),
+                        height: Val::Px(30.0),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                    background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
                     ..default()
-                },
-                border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
-                background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
-                ..default()
-            })
+                })
                 .with_children(|parent| {
                     // The actual health bar
                     parent.spawn((
@@ -69,12 +74,12 @@ pub fn spawn_ui(mut commands: Commands) {
                         ..default()
                     },
                 )
-                    .with_style(Style {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(220.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    }),
+                .with_style(Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(220.0),
+                    top: Val::Px(2.0),
+                    ..default()
+                }),
                 HealthText,
             ));
 
@@ -88,26 +93,42 @@ pub fn spawn_ui(mut commands: Commands) {
                         ..default()
                     },
                 )
+                .with_style(Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    top: Val::Px(10.0),
+                    // Center the text horizontally
+                    margin: UiRect {
+                        left: Val::Px(-40.0), // Approximately half the text width
+                        ..default()
+                    },
+                    ..default()
+                }),
+                GameTimer,
+            ));
+
+            // Kill Counter
+            parent.spawn((
+                TextBundle::from_section(
+                    "Kills: 0",
+                    TextStyle {
+                        font_size: 24.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                )
                     .with_style(Style {
                         position_type: PositionType::Absolute,
-                        left: Val::Percent(50.0),
+                        right: Val::Px(10.0),
                         top: Val::Px(10.0),
-                        // Center the text horizontally
-                        margin: UiRect {
-                            left: Val::Px(-40.0), // Approximately half the text width
-                            ..default()
-                        },
                         ..default()
                     }),
-                GameTimer,
+                KillCounter,
             ));
         });
 }
 
-pub fn cleanup_ui(
-    mut commands: Commands,
-    ui_query: Query<Entity, With<GameUI>>,
-) {
+pub fn cleanup_ui(mut commands: Commands, ui_query: Query<Entity, With<GameUI>>) {
     for entity in ui_query.iter() {
         commands.entity(entity).despawn_recursive();
     }
@@ -145,5 +166,14 @@ pub fn update_health_ui(
                 player_health.maximum as i32
             );
         }
+    }
+}
+
+pub fn update_kill_counter(
+    game_stats: Res<GameStats>,
+    mut kill_counter_query: Query<&mut Text, With<KillCounter>>,
+) {
+    if let Ok(mut text) = kill_counter_query.get_single_mut() {
+        text.sections[0].value = format!("Kills: {}", game_stats.enemies_killed);
     }
 }

@@ -5,6 +5,8 @@ pub struct Player {
     pub health: f32,
     pub max_health: f32,
     pub speed: f32,
+    pub magnet_strength: f32,
+    pub magnet_speed: f32,
 }
 
 #[derive(Component)]
@@ -30,13 +32,31 @@ pub struct Health {
 pub struct Combat {
     pub attack_damage: f32,
     pub attack_speed: f32,
-    pub last_attack: f32,  // Time tracker for attack cooldown
+    pub last_attack: f32, // Time tracker for attack cooldown
 }
 
 #[derive(Component)]
 pub struct Experience {
     pub current: u32,
     pub level: u32,
+}
+
+#[derive(Component)]
+pub struct ExperienceOrb {
+    pub value: u32,
+}
+
+#[derive(Component)]
+pub struct Vacuumable {
+    pub base_speed: f32,
+}
+
+impl Default for Vacuumable {
+    fn default() -> Self {
+        Self {
+            base_speed: 300.0, // Some reasonable default speed
+        }
+    }
 }
 
 #[derive(Component)]
@@ -59,3 +79,6 @@ pub struct PhysicsBody {
     pub radius: f32,
     pub mass: f32,
 }
+
+#[derive(Component)]
+pub struct MarkedForDespawn;

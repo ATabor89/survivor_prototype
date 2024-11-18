@@ -1,4 +1,6 @@
 mod components;
+mod events;
+mod experience;
 mod menu;
 mod physics;
 mod resources;
@@ -9,13 +11,11 @@ mod ui;
 use crate::menu::{cleanup_menu, spawn_pause_menu, MenuPlugin};
 use crate::physics::{handle_collision_events, setup_physics_bodies, PhysicsPlugin};
 use crate::resources::{GameState, GameStats, LastDamageTime, SpawnTimer, UpgradePool, WaveConfig};
-use crate::systems::{
-    combat_system, death_system, enemy_movement, gameplay_movement_system, handle_pause_state,
-    load_textures, quit_game, spawn_enemies, spawn_player, universal_input_system,
-};
-use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui};
+use crate::systems::{cleanup_marked_entities, combat_system, death_system, enemy_movement, gameplay_movement_system, handle_pause_state, load_textures, quit_game, spawn_enemies, spawn_player, universal_input_system};
+use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
+use crate::experience::ExperiencePlugin;
 
 // First, let's organize our systems into sets for better control
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -26,6 +26,7 @@ enum GameplaySets {
     Combat,
     Spawning,
     Physics,
+    Cleanup,
 }
 
 pub struct SurvivorsGamePlugin;
@@ -42,6 +43,9 @@ impl Plugin for SurvivorsGamePlugin {
             .init_resource::<UpgradePool>()
             // States
             .insert_state(GameState::Playing)
+            // Plugins
+            .add_plugins(PhysicsPlugin)
+            .add_plugins(ExperiencePlugin)
             // Startup systems
             .add_systems(Startup, (load_textures, spawn_player.after(load_textures)))
             // Configure system sets
@@ -54,8 +58,15 @@ impl Plugin for SurvivorsGamePlugin {
                     GameplaySets::Movement,
                     GameplaySets::Combat,
                     GameplaySets::Spawning,
+                    GameplaySets::Cleanup,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                cleanup_marked_entities
+                    .in_set(GameplaySets::Cleanup)
+                    .run_if(in_state(GameState::Playing))
             )
             // Add systems to sets and run them only in Playing state
             .add_systems(
@@ -90,7 +101,7 @@ impl Plugin for SurvivorsGamePlugin {
             .add_systems(OnExit(GameState::Playing), cleanup_ui)
             .add_systems(
                 Update,
-                (update_health_ui, update_game_timer)
+                (update_health_ui, update_game_timer, update_kill_counter)
                     .in_set(GameplaySets::UI)
                     .run_if(in_state(GameState::Playing)),
             )
@@ -119,7 +130,6 @@ fn main() {
             ..default()
         }))
         // .add_plugins(DefaultPlugins)
-        .add_plugins(PhysicsPlugin)
         .add_plugins(SurvivorsGamePlugin)
         .add_plugins(MenuPlugin)
         .run();

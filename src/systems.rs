@@ -1,5 +1,8 @@
-use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile};
-use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
+use crate::components::{
+    Combat, Enemy, Experience, Health, MarkedForDespawn, Player, Projectile, Vacuumable,
+};
+use crate::events::EntityDeathEvent;
+use crate::resources::{GameState, GameStats, GameTextures, SpawnTimer, WaveConfig};
 use bevy::math::FloatOrd;
 use bevy::prelude::*;
 use bevy::utils::HashSet;
@@ -19,23 +22,26 @@ pub fn load_textures(
     // Create texture atlas layouts
     let player_layout = TextureAtlasLayout::from_grid(
         UVec2::new(32, 32), // Sprite size
-        1, 1,                  // Grid size (1x1 for now)
-        None,                  // Padding
-        None,                  // Offset
+        1,
+        1,    // Grid size (1x1 for now)
+        None, // Padding
+        None, // Offset
     );
 
     let enemy_layout = TextureAtlasLayout::from_grid(
         UVec2::new(32, 32), // Sprite size
-        2, 1,                  // Grid size (2 types of enemies)
-        None,                  // Padding
-        None,                  // Offset
+        2,
+        1,    // Grid size (2 types of enemies)
+        None, // Padding
+        None, // Offset
     );
 
     let projectile_layout = TextureAtlasLayout::from_grid(
         UVec2::new(16, 16), // Sprite size
-        2, 1,                  // Grid size (2 types of projectiles)
-        None,                  // Padding
-        None,                  // Offset
+        2,
+        1,    // Grid size (2 types of projectiles)
+        None, // Padding
+        None, // Offset
     );
 
     // Store the layouts
@@ -74,10 +80,18 @@ pub fn gameplay_movement_system(
     for (player, mut transform) in query.iter_mut() {
         let mut direction = Vec3::ZERO;
 
-        if keyboard.pressed(KeyCode::KeyW) { direction.y += 1.0; }
-        if keyboard.pressed(KeyCode::KeyS) { direction.y -= 1.0; }
-        if keyboard.pressed(KeyCode::KeyA) { direction.x -= 1.0; }
-        if keyboard.pressed(KeyCode::KeyD) { direction.x += 1.0; }
+        if keyboard.pressed(KeyCode::KeyW) {
+            direction.y += 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyS) {
+            direction.y -= 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyA) {
+            direction.x -= 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyD) {
+            direction.x += 1.0;
+        }
 
         if direction != Vec3::ZERO {
             direction = direction.normalize();
@@ -132,15 +146,14 @@ enum InputSet {
     Gameplay,
 }
 
-pub fn spawn_player(
-    mut commands: Commands,
-    game_textures: Res<GameTextures>,
-) {
+pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
     commands.spawn((
         Player {
             health: 100.0,
             max_health: 100.0,
             speed: 150.0,
+            magnet_strength: 150.0, // Base vacuum range
+            magnet_speed: 1.0,      // Base vacuum speed multiplier
         },
         SpriteBundle {
             texture: game_textures.player.clone(),
@@ -183,7 +196,9 @@ pub fn spawn_enemies(
     enemy_query: Query<&Enemy>,
     player_query: Query<&Transform, With<Player>>,
 ) {
-    if timer.0.tick(time.delta()).just_finished() && enemy_query.iter().count() < wave_config.max_enemies as usize {
+    if timer.0.tick(time.delta()).just_finished()
+        && enemy_query.iter().count() < wave_config.max_enemies as usize
+    {
         // Use get_single() instead of single() to handle missing player gracefully
         let player_transform = match player_query.get_single() {
             Ok(transform) => transform,
@@ -192,8 +207,8 @@ pub fn spawn_enemies(
 
         let spawn_distance = 400.0;
         let random_angle = rand::random::<f32>() * std::f32::consts::TAU;
-        let spawn_position = player_transform.translation +
-            Vec3::new(
+        let spawn_position = player_transform.translation
+            + Vec3::new(
                 random_angle.cos() * spawn_distance,
                 random_angle.sin() * spawn_distance,
                 0.0,
@@ -237,12 +252,11 @@ pub fn combat_system(
 ) {
     for (player_transform, mut combat) in player_query.iter_mut() {
         if time.elapsed_seconds() - combat.last_attack >= 1.0 / combat.attack_speed {
-            if let Some((_, enemy_transform)) = enemy_query
-                .iter()
-                .min_by_key(|(_, transform)| {
-                    FloatOrd((transform.translation - player_transform.translation).length())
-                }) {
-                let direction = (enemy_transform.translation - player_transform.translation).normalize();
+            if let Some((_, enemy_transform)) = enemy_query.iter().min_by_key(|(_, transform)| {
+                FloatOrd((transform.translation - player_transform.translation).length())
+            }) {
+                let direction =
+                    (enemy_transform.translation - player_transform.translation).normalize();
                 let velocity = Vect::new(direction.x, direction.y);
 
                 commands.spawn((
@@ -294,54 +308,45 @@ pub fn enemy_movement(
 
 pub fn death_system(
     mut commands: Commands,
-    mut entity_query: ParamSet<(
-        Query<(Entity, &Health), With<Player>>,
-        Query<(Entity, &Health, &Enemy)>,
-    )>,
+    mut game_stats: ResMut<GameStats>,
+    player_query: Query<(Entity, &Health), With<Player>>,
+    marked_enemies: Query<(Entity, &Transform, &Enemy), With<MarkedForDespawn>>,
+    mut death_events: EventWriter<EntityDeathEvent>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut exp_query: Query<&mut Experience>,
 ) {
-    // Check player death
-    if let Ok((player_entity, player_health)) = entity_query.p0().get_single() {
-        if player_health.current <= 0.0 {
-            info!("Player died!");
-            commands.entity(player_entity).despawn();
+    // Check player death first
+    if let Ok((entity, health)) = player_query.get_single() {
+        if health.current <= 0.0 {
+            commands.entity(entity).despawn();
+            death_events.send(EntityDeathEvent {
+                entity,
+                position: Vec2::ZERO, // Player position if needed
+                exp_value: None,
+            });
             next_state.set(GameState::GameOver);
             return;
         }
     }
 
-    // Track entities marked for death to ensure we only process them once
-    let mut dead_enemies: HashSet<Entity> = HashSet::new();
-    let mut total_exp = 0;
+    // Handle marked enemies
+    for (entity, transform, enemy) in marked_enemies.iter() {
+        game_stats.enemies_killed += 1;
 
-    // Collect dead enemies
-    for (enemy_entity, health, enemy) in entity_query.p1().iter() {
-        if health.current <= 0.0 && !dead_enemies.contains(&enemy_entity) {
-            dead_enemies.insert(enemy_entity);
-            total_exp += enemy.experience_value;
-            info!("Enemy died! Experience gained: {}", enemy.experience_value);
-        }
+        death_events.send(EntityDeathEvent {
+            entity,
+            position: transform.translation.truncate(),
+            exp_value: Some(enemy.experience_value),
+        });
+
+        commands.entity(entity).despawn();
     }
+}
 
-    // Handle experience and despawning
-    if !dead_enemies.is_empty() {
-        // Grant experience
-        if let Ok(mut player_exp) = exp_query.get_single_mut() {
-            player_exp.current += total_exp;
-
-            let exp_needed = player_exp.level * 100;
-            if player_exp.current >= exp_needed {
-                info!("Level up! Current level: {}", player_exp.level + 1);
-                player_exp.current -= exp_needed;
-                player_exp.level += 1;
-                next_state.set(GameState::LevelUp);
-            }
-        }
-
-        // Despawn dead enemies
-        for entity in dead_enemies {
-            commands.entity(entity).despawn();
-        }
+pub fn cleanup_marked_entities(
+    mut commands: Commands,
+    query: Query<Entity, With<MarkedForDespawn>>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
     }
 }
