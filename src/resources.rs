@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::sprite::{TextureAtlas, TextureAtlasLayout, SpriteBundle};
+use bevy::sprite::TextureAtlasLayout;
 use crate::menu::{UpgradeChoice, UpgradeType};
 use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
 
@@ -98,7 +98,7 @@ impl UpgradePool {
         for _ in 0..count {
             let choice = match rand::random::<f32>() {
                 x if x < 0.4 => {
-                    if let Some(&(ref weapon_type, ref rarity)) = self.weapons.choose(&mut rng) {
+                    if let Some((ref weapon_type, ref rarity)) = self.weapons.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Weapon(weapon_type.clone()),
                             description: format!("A {} weapon", weapon_type),
@@ -109,7 +109,7 @@ impl UpgradePool {
                     }
                 }
                 x if x < 0.7 => {
-                    if let Some(&(ref equipment_type, ref rarity)) = self.equipment.choose(&mut rng) {
+                    if let Some((ref equipment_type, ref rarity)) = self.equipment.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Equipment(equipment_type.clone()),
                             description: format!("Some {} equipment", equipment_type),
@@ -120,7 +120,7 @@ impl UpgradePool {
                     }
                 }
                 _ => {
-                    if let Some(&(ref stat_type, ref rarity)) = self.stats.choose(&mut rng) {
+                    if let Some((ref stat_type, ref rarity)) = self.stats.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Stat(stat_type.clone()),
                             description: format!("Increase {}", stat_type),

@@ -280,7 +280,6 @@ pub fn combat_system(
 
 // Update enemy movement using Rapier's velocity system
 pub fn enemy_movement(
-    time: Res<Time>,
     player_query: Query<&Transform, With<Player>>,
     mut enemy_query: Query<(&Transform, &Enemy, &mut Velocity)>,
 ) {

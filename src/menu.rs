@@ -246,7 +246,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                     align_items: AlignItems::Center,
                     ..default()
                 },
-                background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.5)),
+                background_color: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
                 ..default()
             },
             MenuRoot,
@@ -262,7 +262,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                         padding: UiRect::all(Val::Px(20.0)),
                         ..default()
                     },
-                    background_color: BackgroundColor(Color::rgb(0.2, 0.2, 0.2)),
+                    background_color: BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
                     ..default()
                 })
                 .with_children(|parent| {
@@ -293,7 +293,7 @@ pub fn spawn_menu_button(
                     align_items: AlignItems::Center,
                     ..default()
                 },
-                background_color: BackgroundColor(Color::rgb(0.3, 0.3, 0.3)),
+                background_color: BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
                 ..default()
             },
             MenuItem {
