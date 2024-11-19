@@ -1,4 +1,6 @@
+mod combat;
 mod components;
+mod death;
 mod events;
 mod experience;
 mod menu;
@@ -8,14 +10,20 @@ mod systems;
 mod types;
 mod ui;
 
+use crate::combat::{combat_system, handle_damage, DamageEvent};
+use crate::death::{cleanup_marked_entities, death_system};
+use crate::events::EntityDeathEvent;
+use crate::experience::ExperiencePlugin;
 use crate::menu::{cleanup_menu, spawn_pause_menu, MenuPlugin};
-use crate::physics::{handle_collision_events, setup_physics_bodies, PhysicsPlugin};
-use crate::resources::{GameState, GameStats, LastDamageTime, SpawnTimer, UpgradePool, WaveConfig};
-use crate::systems::{cleanup_marked_entities, combat_system, death_system, enemy_movement, gameplay_movement_system, handle_pause_state, load_textures, quit_game, spawn_enemies, spawn_player, universal_input_system};
+use crate::physics::PhysicsPlugin;
+use crate::resources::{GameState, GameStats, SpawnTimer, UpgradePool, WaveConfig};
+use crate::systems::{
+    enemy_movement, gameplay_movement_system, handle_pause_state, load_textures, quit_game,
+    spawn_enemies, spawn_player, universal_input_system,
+};
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
-use crate::experience::ExperiencePlugin;
 
 // First, let's organize our systems into sets for better control
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -38,9 +46,11 @@ impl Plugin for SurvivorsGamePlugin {
             .init_resource::<Time<Virtual>>()
             .init_resource::<GameStats>()
             .init_resource::<SpawnTimer>()
-            .init_resource::<LastDamageTime>()
             .init_resource::<WaveConfig>()
             .init_resource::<UpgradePool>()
+            // Events
+            .add_event::<DamageEvent>()
+            .add_event::<EntityDeathEvent>()
             // States
             .insert_state(GameState::Playing)
             // Plugins
@@ -62,11 +72,23 @@ impl Plugin for SurvivorsGamePlugin {
                 )
                     .chain(),
             )
+            // Add systems by set
+            .add_systems(
+                Update,
+                (
+                    // Combat
+                    handle_damage,
+                    death_system,
+                )
+                    .in_set(GameplaySets::Combat)
+                    .after(GameplaySets::Physics)
+                    .run_if(in_state(GameState::Playing)),
+            )
             .add_systems(
                 Update,
                 cleanup_marked_entities
                     .in_set(GameplaySets::Cleanup)
-                    .run_if(in_state(GameState::Playing))
+                    .run_if(in_state(GameState::Playing)),
             )
             // Add systems to sets and run them only in Playing state
             .add_systems(
@@ -75,13 +97,6 @@ impl Plugin for SurvivorsGamePlugin {
                     // Input
                     (gameplay_movement_system, enemy_movement)
                         .in_set(GameplaySets::Movement)
-                        .run_if(in_state(GameState::Playing)),
-                    // Physics and combat response
-                    (
-                        setup_physics_bodies,
-                        (handle_collision_events, death_system).chain(),
-                    )
-                        .in_set(GameplaySets::Physics)
                         .run_if(in_state(GameState::Playing)),
                     // Spawning
                     spawn_enemies
@@ -124,11 +139,21 @@ impl Plugin for SurvivorsGamePlugin {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(LogPlugin {
-            level: Level::INFO,                                // Only show INFO and above
-            filter: "wgpu=error,bevy_render=info".to_string(), // Customize per-crate logging
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(LogPlugin {
+                    level: Level::INFO,                                // Only show INFO and above
+                    filter: "wgpu=error,bevy_render=info".to_string(), // Customize per-crate logging
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Survivors-Like Prototype".to_string(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+        )
         // .add_plugins(DefaultPlugins)
         .add_plugins(SurvivorsGamePlugin)
         .add_plugins(MenuPlugin)

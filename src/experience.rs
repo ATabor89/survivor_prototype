@@ -1,5 +1,7 @@
 use crate::components::*;
+use crate::death::MarkedForDespawn;
 use crate::events::EntityDeathEvent;
+use crate::menu::{handle_upgrade_selection, spawn_level_up_menu, standard_menu_navigation, update_menu_buttons};
 use crate::resources::GameState;
 use bevy::prelude::*;
 use bevy::utils::HashSet;
@@ -9,17 +11,80 @@ pub struct ExperiencePlugin;
 
 impl Plugin for ExperiencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<EntityDeathEvent>().add_systems(
+        app.add_systems(
             Update,
             (
                 spawn_experience_orbs,
                 vacuum_system,
                 collect_experience_orbs,
+                check_level_up,
             )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
+        )
+        .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
+        .add_systems(
+            Update,
+            (
+                standard_menu_navigation.before(handle_upgrade_selection),
+                handle_upgrade_selection,
+                update_menu_buttons,
+            )
+                .run_if(in_state(GameState::LevelUp)),
         );
     }
+}
+
+// Could move this to a config resource if we want to make it data-driven
+fn calculate_experience_needed(level: u32) -> u32 {
+    // Simple exponential scaling: each level needs 25% more XP than the last
+    // Level 1->2: 100 XP
+    // Level 2->3: 125 XP
+    // Level 3->4: 156 XP
+    // etc.
+    let base_xp = 100;
+    let scaling = 1.25f32;
+    (base_xp as f32 * scaling.powi((level - 1) as i32)) as u32
+}
+
+pub fn check_level_up(
+    mut player_query: Query<&mut Experience, With<Player>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if let Ok(mut experience) = player_query.get_single_mut() {
+        let xp_needed = calculate_experience_needed(experience.level);
+
+        if experience.current >= xp_needed {
+            // Bank the leftover XP
+            experience.current -= xp_needed;
+            experience.level += 1;
+
+            // Trigger level up menu
+            next_state.set(GameState::LevelUp);
+        }
+    }
+}
+
+// Ensure the game is actually paused during level up
+pub fn handle_level_up_pause(
+    mut rapier_config: ResMut<RapierConfiguration>,
+    mut time: ResMut<Time<Virtual>>,
+) {
+    // Pause physics
+    rapier_config.physics_pipeline_active = false;
+    // Pause virtual time
+    time.pause();
+}
+
+// Resume game after level up
+pub fn handle_level_up_resume(
+    mut rapier_config: ResMut<RapierConfiguration>,
+    mut time: ResMut<Time<Virtual>>,
+) {
+    // Resume physics
+    rapier_config.physics_pipeline_active = true;
+    // Resume virtual time
+    time.unpause();
 }
 
 fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<EntityDeathEvent>) {

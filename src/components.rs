@@ -2,8 +2,6 @@ use bevy::prelude::*;
 
 #[derive(Component)]
 pub struct Player {
-    pub health: f32,
-    pub max_health: f32,
     pub speed: f32,
     pub magnet_strength: f32,
     pub magnet_speed: f32,
@@ -11,14 +9,12 @@ pub struct Player {
 
 #[derive(Component)]
 pub struct Enemy {
-    pub health: f32,
     pub speed: f32,
     pub experience_value: u32,
 }
 
 #[derive(Component)]
 pub struct Projectile {
-    pub damage: f32,
     pub speed: f32,
 }
 
@@ -79,6 +75,3 @@ pub struct PhysicsBody {
     pub radius: f32,
     pub mass: f32,
 }
-
-#[derive(Component)]
-pub struct MarkedForDespawn;

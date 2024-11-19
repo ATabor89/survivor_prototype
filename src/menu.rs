@@ -1,7 +1,7 @@
-use bevy::prelude::*;
 use crate::components::PlayerStats;
 use crate::resources::{GameState, UpgradePool};
 use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
+use bevy::prelude::*;
 
 // Base menu components
 #[derive(Component)]
@@ -62,41 +62,187 @@ pub fn menu_input_system(
     // Handle common input behaviors
 }
 
-// Specific systems for level-up menu
 pub fn spawn_level_up_menu(
     mut commands: Commands,
-    player_stats: Query<&PlayerStats>,
     upgrade_pool: Res<UpgradePool>,
 ) {
+    // Generate 3 random upgrade choices
+    let choices = upgrade_pool.generate_choices(3);
+    info!("Generated {} upgrade choices", choices.len());
+    for choice in choices.iter() {
+        info!("Choice: {:?}", choice.upgrade_type);
+    }
+
     commands.spawn((
-        MenuRoot,
-        MenuType::LevelUp,
         NodeBundle {
-            // UI styling
+            style: Style {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                ..default()
+            },
+            z_index: ZIndex::Global(100), // Ensure it's on top
+            background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.8)),
             ..default()
         },
+        MenuRoot,
+        MenuType::LevelUp,
     ))
         .with_children(|parent| {
-            // Generate random upgrade choices
-            let choices = upgrade_pool.generate_choices(3);
+            // Container for upgrade choices
+            parent.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(20.0),
+                    width: Val::Px(600.0), // Made wider
+                    padding: UiRect::all(Val::Px(30.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+                ..default()
+            })
+                .with_children(|parent| {
+                    // Level Up Title
+                    parent.spawn(TextBundle::from_section(
+                        "Level Up!",
+                        TextStyle {
+                            font_size: 48.0, // Made larger
+                            color: Color::srgb(1.0, 0.8, 0.0), // Gold color
+                            ..default()
+                        },
+                    ));
 
-            for choice in choices {
-                spawn_upgrade_choice(parent, choice);
-            }
+                    // Spawn upgrade choices
+                    for (index, choice) in choices.iter().enumerate() {
+                        spawn_upgrade_choice(parent, choice.clone(), index == 0);
+                    }
+                });
         });
 }
 
-pub fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice) {
+fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is_first: bool) {
+    let (icon, name, description) = get_upgrade_display_info(&choice);
+
     parent.spawn((
+        ButtonBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(100.0), // Made taller
+                padding: UiRect::all(Val::Px(16.0)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                border: UiRect::all(Val::Px(2.0)),
+                margin: UiRect::vertical(Val::Px(4.0)),
+                ..default()
+            },
+            border_color: BorderColor(get_rarity_color(&choice.rarity).with_alpha(0.5)),
+            background_color: BackgroundColor(if is_first {
+                Color::srgb(0.3, 0.3, 0.4)
+            } else {
+                Color::srgb(0.2, 0.2, 0.2)
+            }),
+            ..default()
+        },
         MenuItem {
-            selected: false,
+            selected: is_first,
             action: MenuAction::SelectUpgrade(choice.clone()),
         },
-        // UI styling and layout
     ))
-        .with_children(|choice_parent| {
-            // Add icon, description, etc.
+        .with_children(|parent| {
+            // Icon placeholder
+            parent.spawn(TextBundle::from_section(
+                icon,
+                TextStyle {
+                    font_size: 32.0, // Made larger
+                    color: get_rarity_color(&choice.rarity),
+                    ..default()
+                },
+            ));
+
+            // Text container
+            parent.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
+                ..default()
+            })
+                .with_children(|parent| {
+                    // Upgrade name
+                    parent.spawn(TextBundle::from_section(
+                        name,
+                        TextStyle {
+                            font_size: 24.0, // Made larger
+                            color: get_rarity_color(&choice.rarity),
+                            ..default()
+                        },
+                    ));
+
+                    // Description
+                    parent.spawn(TextBundle::from_section(
+                        description,
+                        TextStyle {
+                            font_size: 18.0, // Made larger
+                            color: Color::srgb(0.8, 0.8, 0.8),
+                            ..default()
+                        },
+                    ));
+                });
         });
+}
+
+fn get_rarity_color(rarity: &Rarity) -> Color {
+    match rarity {
+        Rarity::Common => Color::srgb(0.8, 0.8, 0.8),
+        Rarity::Uncommon => Color::srgb(0.0, 0.8, 0.0),
+        Rarity::Rare => Color::srgb(0.0, 0.5, 1.0),
+        Rarity::Epic => Color::srgb(0.6, 0.0, 0.8),
+        Rarity::Legendary => Color::srgb(1.0, 0.5, 0.0),
+    }
+}
+
+fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, String) {
+    match &choice.upgrade_type {
+        UpgradeType::Weapon(weapon_type) => {
+            let icon = match weapon_type {
+                WeaponType::Sword => "⚔️",
+                WeaponType::Axe => "🪓",
+                WeaponType::Spear => "🔱",
+                WeaponType::Bow => "🏹",
+                WeaponType::Magic => "🔮",
+            };
+            (icon, format!("{} Weapon", weapon_type), choice.description.clone())
+        }
+        UpgradeType::Equipment(equipment_type) => {
+            let icon = match equipment_type {
+                EquipmentType::Armor => "🛡️",
+                EquipmentType::Ring => "💍",
+                EquipmentType::Amulet => "📿",
+                EquipmentType::Boots => "👢",
+                EquipmentType::Gloves => "🧤",
+            };
+            (icon, format!("{}", equipment_type), choice.description.clone())
+        }
+        UpgradeType::Stat(stat_type) => {
+            let icon = match stat_type {
+                StatType::Health => "❤️",
+                StatType::Speed => "👟",
+                StatType::Attack => "⚡",
+                StatType::Defense => "🛡️",
+                StatType::Luck => "🍀",
+            };
+            (icon, format!("{} Up", stat_type), choice.description.clone())
+        }
+    }
 }
 
 // Navigation systems
@@ -119,7 +265,9 @@ pub fn standard_menu_navigation(
 
     // Calculate new selected index
     let items_len = items.len();
-    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp) || keyboard.just_pressed(KeyCode::KeyW) {
+    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp)
+        || keyboard.just_pressed(KeyCode::KeyW)
+    {
         (current_selected + items_len - 1) % items_len
     } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
         (current_selected + 1) % items_len
@@ -164,7 +312,9 @@ pub fn level_up_menu_navigation(
 
     // Calculate new selected index
     let items_len = items.len();
-    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp) || keyboard.just_pressed(KeyCode::KeyW) {
+    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp)
+        || keyboard.just_pressed(KeyCode::KeyW)
+    {
         (current_selected + items_len - 1) % items_len
     } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
         (current_selected + 1) % items_len
@@ -185,10 +335,7 @@ pub fn level_up_menu_navigation(
     }
 }
 
-pub fn cleanup_menu(
-    mut commands: Commands,
-    menu_query: Query<Entity, With<MenuRoot>>,
-) {
+pub fn cleanup_menu(mut commands: Commands, menu_query: Query<Entity, With<MenuRoot>>) {
     for entity in menu_query.iter() {
         commands.entity(entity).despawn_recursive();
     }
@@ -205,9 +352,9 @@ fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>
             next_state.set(GameState::Playing);
             // When implementing settings, use:
             // next_state.set(GameState::Settings);
-        },
+        }
         MenuAction::QuitGame => next_state.set(GameState::Quit),
-        MenuAction::SelectUpgrade(_) => {}, // Handled elsewhere
+        MenuAction::SelectUpgrade(_) => {} // Handled elsewhere
     }
 }
 
@@ -220,15 +367,13 @@ pub fn apply_upgrade(upgrade: &UpgradeChoice, player_query: &mut Query<&mut Play
             UpgradeType::Equipment(_) => {
                 // Add equipment to inventory
             }
-            UpgradeType::Stat(stat_type) => {
-                match stat_type {
-                    StatType::Health => stats.health *= 1.1,
-                    StatType::Speed => stats.speed *= 1.1,
-                    StatType::Attack => stats.attack *= 1.1,
-                    StatType::Defense => stats.defense *= 1.1,
-                    StatType::Luck => stats.luck *= 1.1,
-                }
-            }
+            UpgradeType::Stat(stat_type) => match stat_type {
+                StatType::Health => stats.health *= 1.1,
+                StatType::Speed => stats.speed *= 1.1,
+                StatType::Attack => stats.attack *= 1.1,
+                StatType::Defense => stats.defense *= 1.1,
+                StatType::Luck => stats.luck *= 1.1,
+            },
         }
     }
 }
@@ -296,10 +441,7 @@ pub fn spawn_menu_button(
                 background_color: BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
                 ..default()
             },
-            MenuItem {
-                selected,
-                action,
-            },
+            MenuItem { selected, action },
         ))
         .with_children(|parent| {
             parent.spawn(TextBundle::from_section(
@@ -313,13 +455,8 @@ pub fn spawn_menu_button(
         });
 }
 
-fn update_menu_buttons(
-    mut buttons: Query<(
-        &MenuItem,
-        &mut BackgroundColor,
-        &Children,
-        &Interaction,
-    )>,
+pub fn update_menu_buttons(
+    mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, &Interaction)>,
     mut text_query: Query<&mut Text>,
 ) {
     for (menu_item, mut background_color, children, interaction) in buttons.iter_mut() {
@@ -350,6 +487,44 @@ fn update_menu_buttons(
     }
 }
 
+pub fn handle_upgrade_selection(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut menu_query: Query<(&MenuType, &MenuItem)>,
+    menu_root_query: Query<Entity, With<MenuRoot>>,
+    mut player_query: Query<&mut PlayerStats>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let mut selected_upgrade = None;
+
+    // Check for keyboard/mouse selection
+    for (menu_type, menu_item) in menu_query.iter() {
+        if !matches!(menu_type, MenuType::LevelUp) {
+            continue;
+        }
+
+        if menu_item.selected && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)) {
+            if let MenuAction::SelectUpgrade(upgrade) = &menu_item.action {
+                selected_upgrade = Some(upgrade.clone());
+            }
+        }
+    }
+
+    if let Some(upgrade) = selected_upgrade {
+        // Apply the upgrade
+        apply_upgrade(&upgrade, &mut player_query);
+
+        // Clean up menu
+        if let Ok(root_entity) = menu_root_query.get_single() {
+            commands.entity(root_entity).despawn_recursive();
+        }
+
+        // Return to playing state
+        next_state.set(GameState::Playing);
+    }
+}
+
 // Plugin to organize it all
 pub struct MenuPlugin;
 
@@ -363,15 +538,13 @@ impl Plugin for MenuPlugin {
                 update_menu_buttons,
                 handle_button_interactions,
             )
-                .run_if(in_state(GameState::Paused))
+                .run_if(in_state(GameState::Paused)),
         );
     }
 }
 
 // Add this system to handle button hover states
-fn menu_hover_system(
-    mut buttons: Query<(&Interaction, &mut MenuItem)>,
-) {
+fn menu_hover_system(mut buttons: Query<(&Interaction, &mut MenuItem)>) {
     for (interaction, mut menu_item) in buttons.iter_mut() {
         // Only update selection on hover if not already selected by keyboard
         if !menu_item.selected {

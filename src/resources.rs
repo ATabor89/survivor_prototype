@@ -22,9 +22,6 @@ pub struct GameStats {
     pub victory_threshold: u32,
 }
 
-#[derive(Resource, Default)]
-pub struct LastDamageTime(pub f32);
-
 #[derive(Resource)]
 pub struct SpawnTimer(pub Timer);
 
@@ -60,31 +57,42 @@ pub struct GameTextures {
     pub projectiles_layout: Handle<TextureAtlasLayout>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct UpgradePool {
     weapons: Vec<(WeaponType, Rarity)>,
     equipment: Vec<(EquipmentType, Rarity)>,
     stats: Vec<(StatType, Rarity)>,
 }
 
+impl Default for UpgradePool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UpgradePool {
     pub fn new() -> Self {
-        // Initialize with some default options
         Self {
             weapons: vec![
                 (WeaponType::Sword, Rarity::Common),
                 (WeaponType::Axe, Rarity::Common),
-                // Add more as needed
+                (WeaponType::Spear, Rarity::Uncommon),
+                (WeaponType::Bow, Rarity::Uncommon),
+                (WeaponType::Magic, Rarity::Rare),
             ],
             equipment: vec![
                 (EquipmentType::Armor, Rarity::Common),
-                (EquipmentType::Ring, Rarity::Common),
-                // Add more as needed
+                (EquipmentType::Ring, Rarity::Uncommon),
+                (EquipmentType::Amulet, Rarity::Rare),
+                (EquipmentType::Boots, Rarity::Common),
+                (EquipmentType::Gloves, Rarity::Uncommon),
             ],
             stats: vec![
                 (StatType::Health, Rarity::Common),
                 (StatType::Speed, Rarity::Common),
-                // Add more as needed
+                (StatType::Attack, Rarity::Uncommon),
+                (StatType::Defense, Rarity::Common),
+                (StatType::Luck, Rarity::Rare),
             ],
         }
     }
@@ -92,16 +100,16 @@ impl UpgradePool {
     pub fn generate_choices(&self, count: usize) -> Vec<UpgradeChoice> {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
-
         let mut choices = Vec::new();
 
-        for _ in 0..count {
+        while choices.len() < count {
             let choice = match rand::random::<f32>() {
                 x if x < 0.4 => {
+                    // Weapon choice
                     if let Some((ref weapon_type, ref rarity)) = self.weapons.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Weapon(weapon_type.clone()),
-                            description: format!("A {} weapon", weapon_type),
+                            description: format!("Add a {} to your arsenal", weapon_type),
                             rarity: rarity.clone(),
                         }
                     } else {
@@ -109,10 +117,11 @@ impl UpgradePool {
                     }
                 }
                 x if x < 0.7 => {
+                    // Equipment choice
                     if let Some((ref equipment_type, ref rarity)) = self.equipment.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Equipment(equipment_type.clone()),
-                            description: format!("Some {} equipment", equipment_type),
+                            description: format!("Equip {} for enhanced protection", equipment_type),
                             rarity: rarity.clone(),
                         }
                     } else {
@@ -120,10 +129,11 @@ impl UpgradePool {
                     }
                 }
                 _ => {
+                    // Stat choice
                     if let Some((ref stat_type, ref rarity)) = self.stats.choose(&mut rng) {
                         UpgradeChoice {
                             upgrade_type: UpgradeType::Stat(stat_type.clone()),
-                            description: format!("Increase {}", stat_type),
+                            description: format!("Increase your {} by 10%", stat_type),
                             rarity: rarity.clone(),
                         }
                     } else {

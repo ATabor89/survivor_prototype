@@ -1,6 +1,4 @@
-use crate::components::{
-    Combat, Enemy, Experience, Health, MarkedForDespawn, Player, Projectile, Vacuumable,
-};
+use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile, Vacuumable};
 use crate::events::EntityDeathEvent;
 use crate::resources::{GameState, GameStats, GameTextures, SpawnTimer, WaveConfig};
 use bevy::math::FloatOrd;
@@ -149,8 +147,6 @@ enum InputSet {
 pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
     commands.spawn((
         Player {
-            health: 100.0,
-            max_health: 100.0,
             speed: 150.0,
             magnet_strength: 150.0, // Base vacuum range
             magnet_speed: 1.0,      // Base vacuum speed multiplier
@@ -218,7 +214,6 @@ pub fn spawn_enemies(
 
         commands.spawn((
             Enemy {
-                health: 50.0,
                 speed: 100.0,
                 experience_value: 10,
             },
@@ -236,59 +231,10 @@ pub fn spawn_enemies(
                 index: sprite_index,
             },
             Health {
-                current: 50.0,
-                maximum: 50.0,
+                current: 20.0,
+                maximum: 20.0,
             },
         ));
-    }
-}
-
-pub fn combat_system(
-    mut commands: Commands,
-    game_textures: Res<GameTextures>,
-    time: Res<Time<Virtual>>,
-    mut player_query: Query<(&Transform, &mut Combat), With<Player>>,
-    enemy_query: Query<(Entity, &Transform), With<Enemy>>,
-) {
-    for (player_transform, mut combat) in player_query.iter_mut() {
-        if time.elapsed_seconds() - combat.last_attack >= 1.0 / combat.attack_speed {
-            if let Some((_, enemy_transform)) = enemy_query.iter().min_by_key(|(_, transform)| {
-                FloatOrd((transform.translation - player_transform.translation).length())
-            }) {
-                let direction =
-                    (enemy_transform.translation - player_transform.translation).normalize();
-                let velocity = Vect::new(direction.x, direction.y);
-
-                commands.spawn((
-                    Projectile {
-                        damage: combat.attack_damage,
-                        speed: 300.0,
-                    },
-                    SpriteBundle {
-                        texture: game_textures.projectiles.clone(),
-                        sprite: Sprite {
-                            custom_size: Some(Vec2::new(16.0, 16.0)),
-                            ..default()
-                        },
-                        transform: Transform::from_translation(player_transform.translation),
-                        ..default()
-                    },
-                    TextureAtlas {
-                        layout: game_textures.projectiles_layout.clone(),
-                        index: 0,
-                    },
-                    RigidBody::Dynamic,
-                    Collider::ball(8.0),
-                    LockedAxes::ROTATION_LOCKED,
-                    ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
-                    Velocity::linear(velocity * 300.0),
-                    Dominance::group(5),
-                ));
-
-                combat.last_attack = time.elapsed_seconds();
-            }
-        }
     }
 }
 
@@ -303,50 +249,5 @@ pub fn enemy_movement(
             // Reduce speed slightly to make collisions more stable
             velocity.linvel = direction.truncate() * enemy.speed * 0.8;
         }
-    }
-}
-
-pub fn death_system(
-    mut commands: Commands,
-    mut game_stats: ResMut<GameStats>,
-    player_query: Query<(Entity, &Health), With<Player>>,
-    marked_enemies: Query<(Entity, &Transform, &Enemy), With<MarkedForDespawn>>,
-    mut death_events: EventWriter<EntityDeathEvent>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    // Check player death first
-    if let Ok((entity, health)) = player_query.get_single() {
-        if health.current <= 0.0 {
-            commands.entity(entity).despawn();
-            death_events.send(EntityDeathEvent {
-                entity,
-                position: Vec2::ZERO, // Player position if needed
-                exp_value: None,
-            });
-            next_state.set(GameState::GameOver);
-            return;
-        }
-    }
-
-    // Handle marked enemies
-    for (entity, transform, enemy) in marked_enemies.iter() {
-        game_stats.enemies_killed += 1;
-
-        death_events.send(EntityDeathEvent {
-            entity,
-            position: transform.translation.truncate(),
-            exp_value: Some(enemy.experience_value),
-        });
-
-        commands.entity(entity).despawn();
-    }
-}
-
-pub fn cleanup_marked_entities(
-    mut commands: Commands,
-    query: Query<Entity, With<MarkedForDespawn>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
     }
 }
