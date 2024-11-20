@@ -1,7 +1,6 @@
 use crate::components::*;
 use crate::death::MarkedForDespawn;
 use crate::events::EntityDeathEvent;
-use crate::menu::spawn_level_up_menu;
 use crate::resources::GameState;
 use bevy::prelude::*;
 use bevy::utils::HashSet;

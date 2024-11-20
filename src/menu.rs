@@ -2,7 +2,7 @@ use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
 use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
 use crate::upgrade;
-use crate::upgrade::{apply_confirmed_upgrade, UpgradePool};
+use crate::upgrade::UpgradePool;
 use bevy::prelude::*;
 
 // Base menu components
