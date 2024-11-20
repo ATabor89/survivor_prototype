@@ -133,7 +133,7 @@ impl Plugin for SurvivorsGamePlugin {
             )
             // Universal input handling
             .add_systems(Update, universal_input_system.in_set(GameplaySets::Input))
-            .add_systems(Update, handle_pause_state.in_set(GameplaySets::Input));
+            .add_systems(Update, handle_pause_state.in_set(GameplaySets::Input).before(GameplaySets::Physics));
     }
 }
 

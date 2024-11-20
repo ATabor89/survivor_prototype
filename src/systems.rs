@@ -1,9 +1,6 @@
-use crate::components::{Combat, Enemy, Experience, Health, Player, Projectile, Vacuumable};
-use crate::events::EntityDeathEvent;
-use crate::resources::{GameState, GameStats, GameTextures, SpawnTimer, WaveConfig};
-use bevy::math::FloatOrd;
+use crate::components::{Combat, Enemy, Experience, Health, Player};
+use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::prelude::*;
-use bevy::utils::HashSet;
 use bevy_rapier2d::prelude::*;
 
 // Startup system to load textures and create atlas layouts
@@ -120,19 +117,17 @@ pub fn handle_pause_state(
     game_state: Res<State<GameState>>,
 ) {
     match game_state.get() {
-        GameState::Paused => {
-            // Pause physics
-            rapier_config.physics_pipeline_active = false;
-            // Pause virtual time
-            time.pause();
-        }
         GameState::Playing => {
-            // Resume physics
+            // Resume physics and time
             rapier_config.physics_pipeline_active = true;
-            // Resume virtual time
             time.unpause();
         }
-        _ => {}
+        GameState::Paused | GameState::LevelUp | GameState::GameOver => {
+            // Pause physics and time for any state where the game should be frozen
+            rapier_config.physics_pipeline_active = false;
+            time.pause();
+        }
+        _ => {} // Other states don't affect physics/time
     }
 }
 
@@ -215,7 +210,7 @@ pub fn spawn_enemies(
         commands.spawn((
             Enemy {
                 speed: 100.0,
-                experience_value: 10,
+                experience_value: 50,
             },
             SpriteBundle {
                 texture: game_textures.enemies.clone(),

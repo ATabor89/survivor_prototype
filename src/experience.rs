@@ -22,16 +22,7 @@ impl Plugin for ExperiencePlugin {
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         )
-        .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
-        .add_systems(
-            Update,
-            (
-                standard_menu_navigation.before(handle_upgrade_selection),
-                handle_upgrade_selection,
-                update_menu_buttons,
-            )
-                .run_if(in_state(GameState::LevelUp)),
-        );
+            .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu);
     }
 }
 
@@ -63,28 +54,6 @@ pub fn check_level_up(
             next_state.set(GameState::LevelUp);
         }
     }
-}
-
-// Ensure the game is actually paused during level up
-pub fn handle_level_up_pause(
-    mut rapier_config: ResMut<RapierConfiguration>,
-    mut time: ResMut<Time<Virtual>>,
-) {
-    // Pause physics
-    rapier_config.physics_pipeline_active = false;
-    // Pause virtual time
-    time.pause();
-}
-
-// Resume game after level up
-pub fn handle_level_up_resume(
-    mut rapier_config: ResMut<RapierConfiguration>,
-    mut time: ResMut<Time<Virtual>>,
-) {
-    // Resume physics
-    rapier_config.physics_pipeline_active = true;
-    // Resume virtual time
-    time.unpause();
 }
 
 fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<EntityDeathEvent>) {
