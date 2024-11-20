@@ -8,7 +8,7 @@ pub enum Rarity {
     Legendary,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum WeaponType {
     Sword,
     Axe,
@@ -17,7 +17,7 @@ pub enum WeaponType {
     Magic,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EquipmentType {
     Armor,
     Ring,
@@ -26,7 +26,7 @@ pub enum EquipmentType {
     Gloves,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum StatType {
     Health,
     Speed,

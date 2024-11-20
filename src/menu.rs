@@ -1,6 +1,8 @@
 use crate::components::PlayerStats;
-use crate::resources::{GameState, UpgradePool};
+use crate::resources::GameState;
 use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
+use crate::upgrade;
+use crate::upgrade::{add_upgrade_tracking, apply_confirmed_upgrade, UpgradePool};
 use bevy::prelude::*;
 
 // Base menu components
@@ -136,141 +138,19 @@ pub fn spawn_level_up_menu(mut commands: Commands, upgrade_pool: Res<UpgradePool
 
                     // Spawn upgrade choices
                     for (index, choice) in choices.iter().enumerate() {
-                        spawn_upgrade_choice(parent, choice.clone(), index == 0);
+                        upgrade::spawn_upgrade_choice(parent, choice.clone(), index == 0);
                     }
                 });
         });
 }
 
-fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is_first: bool) {
-    let (icon, name, description) = get_upgrade_display_info(&choice);
-
-    parent
-        .spawn((
-            ButtonBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    min_height: Val::Px(100.0), // Made taller
-                    padding: UiRect::all(Val::Px(16.0)),
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(16.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    ..default()
-                },
-                border_color: BorderColor(get_rarity_color(&choice.rarity).with_alpha(0.5)),
-                background_color: BackgroundColor(if is_first {
-                    Color::srgb(0.3, 0.3, 0.4)
-                } else {
-                    Color::srgb(0.2, 0.2, 0.2)
-                }),
-                ..default()
-            },
-            MenuItem {
-                selected: is_first,
-            },
-            MenuActionComponent { action: MenuAction::SelectUpgrade(choice.clone()), }
-        ))
-        .with_children(|parent| {
-            // Icon placeholder
-            parent.spawn(TextBundle::from_section(
-                icon,
-                TextStyle {
-                    font_size: 32.0, // Made larger
-                    color: get_rarity_color(&choice.rarity),
-                    ..default()
-                },
-            ));
-
-            // Text container
-            parent
-                .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    },
-                    ..default()
-                })
-                .with_children(|parent| {
-                    // Upgrade name
-                    parent.spawn(TextBundle::from_section(
-                        name,
-                        TextStyle {
-                            font_size: 24.0, // Made larger
-                            color: get_rarity_color(&choice.rarity),
-                            ..default()
-                        },
-                    ));
-
-                    // Description
-                    parent.spawn(TextBundle::from_section(
-                        description,
-                        TextStyle {
-                            font_size: 18.0, // Made larger
-                            color: Color::srgb(0.8, 0.8, 0.8),
-                            ..default()
-                        },
-                    ));
-                });
-        });
-}
-
-fn get_rarity_color(rarity: &Rarity) -> Color {
+pub(crate) fn get_rarity_color(rarity: &Rarity) -> Color {
     match rarity {
         Rarity::Common => Color::srgb(0.8, 0.8, 0.8),
         Rarity::Uncommon => Color::srgb(0.0, 0.8, 0.0),
         Rarity::Rare => Color::srgb(0.0, 0.5, 1.0),
         Rarity::Epic => Color::srgb(0.6, 0.0, 0.8),
         Rarity::Legendary => Color::srgb(1.0, 0.5, 0.0),
-    }
-}
-
-fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, String) {
-    match &choice.upgrade_type {
-        UpgradeType::Weapon(weapon_type) => {
-            let icon = match weapon_type {
-                WeaponType::Sword => "⚔️",
-                WeaponType::Axe => "🪓",
-                WeaponType::Spear => "🔱",
-                WeaponType::Bow => "🏹",
-                WeaponType::Magic => "🔮",
-            };
-            (
-                icon,
-                format!("{} Weapon", weapon_type),
-                choice.description.clone(),
-            )
-        }
-        UpgradeType::Equipment(equipment_type) => {
-            let icon = match equipment_type {
-                EquipmentType::Armor => "🛡️",
-                EquipmentType::Ring => "💍",
-                EquipmentType::Amulet => "📿",
-                EquipmentType::Boots => "👢",
-                EquipmentType::Gloves => "🧤",
-            };
-            (
-                icon,
-                format!("{}", equipment_type),
-                choice.description.clone(),
-            )
-        }
-        UpgradeType::Stat(stat_type) => {
-            let icon = match stat_type {
-                StatType::Health => "❤️",
-                StatType::Speed => "👟",
-                StatType::Attack => "⚡",
-                StatType::Defense => "🛡️",
-                StatType::Luck => "🍀",
-            };
-            (
-                icon,
-                format!("{} Up", stat_type),
-                choice.description.clone(),
-            )
-        }
     }
 }
 
@@ -298,9 +178,7 @@ pub fn standard_menu_navigation(
         || keyboard.just_pressed(KeyCode::KeyW)
     {
         (current_selected + items_len - 1) % items_len
-    } else if keyboard.just_pressed(KeyCode::ArrowDown)
-        || keyboard.just_pressed(KeyCode::KeyS)
-    {
+    } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
         (current_selected + 1) % items_len
     } else {
         current_selected
@@ -346,9 +224,7 @@ pub fn level_up_menu_navigation(
         || keyboard.just_pressed(KeyCode::KeyW)
     {
         (current_selected + items_len - 1) % items_len
-    } else if keyboard.just_pressed(KeyCode::ArrowDown)
-        || keyboard.just_pressed(KeyCode::KeyS)
-    {
+    } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
         (current_selected + 1) % items_len
     } else {
         current_selected
@@ -387,34 +263,6 @@ fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>
         }
         MenuAction::QuitGame => next_state.set(GameState::Quit),
         MenuAction::SelectUpgrade(_) => {} // Handled elsewhere
-    }
-}
-
-// System to apply confirmed upgrades
-pub fn apply_confirmed_upgrade(
-    mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
-    mut player_stats: Query<&mut PlayerStats>,
-) {
-    for event in upgrade_events.read() {
-        if let Ok(mut stats) = player_stats.get_single_mut() {
-            match &event.upgrade.upgrade_type {
-                UpgradeType::Stat(stat_type) => match stat_type {
-                    StatType::Health => stats.health *= 1.1,
-                    StatType::Speed => stats.speed *= 1.1,
-                    StatType::Attack => stats.attack *= 1.1,
-                    StatType::Defense => stats.defense *= 1.1,
-                    StatType::Luck => stats.luck *= 1.1,
-                },
-                UpgradeType::Weapon(weapon_type) => {
-                    info!("Adding weapon: {:?}", weapon_type);
-                    // TODO: Implement weapon system
-                }
-                UpgradeType::Equipment(equipment_type) => {
-                    info!("Adding equipment: {:?}", equipment_type);
-                    // TODO: Implement equipment system
-                }
-            }
-        }
     }
 }
 
@@ -629,8 +477,11 @@ impl Plugin for MenuPlugin {
                 MenuSystemSet::Navigation,
                 MenuSystemSet::Selection,
                 MenuSystemSet::Confirmation,
-            ).chain()
+            )
+                .chain(),
         );
+
+        app.add_systems(Startup, add_upgrade_tracking);
 
         // Add systems for the level up menu state
         app.add_systems(
@@ -643,7 +494,7 @@ impl Plugin for MenuPlugin {
                 apply_confirmed_upgrade,
             )
                 .chain() // Use chain() to ensure sequential execution
-                .run_if(in_state(GameState::LevelUp))
+                .run_if(in_state(GameState::LevelUp)),
         );
 
         // Add systems for the pause menu state
@@ -655,7 +506,7 @@ impl Plugin for MenuPlugin {
                 update_menu_buttons,
             )
                 .chain()
-                .run_if(in_state(GameState::Paused))
+                .run_if(in_state(GameState::Paused)),
         );
     }
 }
