@@ -1,7 +1,7 @@
 use crate::components::*;
 use crate::death::MarkedForDespawn;
 use crate::events::EntityDeathEvent;
-use crate::menu::{handle_upgrade_selection, spawn_level_up_menu, standard_menu_navigation, update_menu_buttons};
+use crate::menu::spawn_level_up_menu;
 use crate::resources::GameState;
 use bevy::prelude::*;
 use bevy::utils::HashSet;
@@ -21,8 +21,7 @@ impl Plugin for ExperiencePlugin {
             )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
-        )
-            .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu);
+        );
     }
 }
 

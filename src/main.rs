@@ -15,7 +15,7 @@ use crate::combat::{combat_system, handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
 use crate::events::EntityDeathEvent;
 use crate::experience::ExperiencePlugin;
-use crate::menu::{cleanup_menu, spawn_pause_menu, MenuPlugin};
+use crate::menu::MenuPlugin;
 use crate::physics::PhysicsPlugin;
 use crate::resources::{GameState, GameStats, SpawnTimer, WaveConfig};
 use crate::systems::{
@@ -56,6 +56,7 @@ impl Plugin for SurvivorsGamePlugin {
             // States
             .insert_state(GameState::Playing)
             // Plugins
+            .add_plugins(MenuPlugin)
             .add_plugins(PhysicsPlugin)
             .add_plugins(ExperiencePlugin)
             // Startup systems
@@ -122,9 +123,6 @@ impl Plugin for SurvivorsGamePlugin {
                     .in_set(GameplaySets::UI)
                     .run_if(in_state(GameState::Playing)),
             )
-            // Menu-related systems
-            .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
-            .add_systems(OnExit(GameState::Paused), cleanup_menu)
             .add_systems(OnEnter(GameState::Quit), quit_game)
             .add_systems(
                 OnEnter(GameState::Settings),
@@ -163,6 +161,5 @@ fn main() {
         )
         // .add_plugins(DefaultPlugins)
         .add_plugins(SurvivorsGamePlugin)
-        .add_plugins(MenuPlugin)
         .run();
 }

@@ -7,6 +7,7 @@ edition = "2021"
 bevy = "0.14.2"
 bevy_rapier2d = { version = "0.27.0", features = ["debug-render-2d"] }
 rand = "0.8.5"
+fastrand = "2.1.1"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

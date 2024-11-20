@@ -1,13 +1,15 @@
-use crate::components::PlayerStats;
+use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
 use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
 use crate::upgrade;
-use crate::upgrade::{add_upgrade_tracking, apply_confirmed_upgrade, UpgradePool};
+use crate::upgrade::{apply_confirmed_upgrade, UpgradePool};
 use bevy::prelude::*;
 
 // Base menu components
 #[derive(Component)]
-pub struct MenuRoot;
+pub struct MenuRoot {
+    pub menu_type: MenuType,
+}
 
 #[derive(Component)]
 pub struct MenuItem {
@@ -19,28 +21,19 @@ pub struct MenuActionComponent {
     pub action: MenuAction,
 }
 
-#[derive(Component)]
-pub struct MenuText;
-
-// Specific menu types
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub enum MenuType {
     Main,
     Pause,
-    Settings,
     LevelUp,
 }
 
-// Actions that can be triggered by menu items
+// Simplified menu actions
 #[derive(Clone)]
 pub enum MenuAction {
-    // Standard menu actions
     StartGame,
     ResumeGame,
-    OpenSettings,
     QuitGame,
-
-    // Level-up specific actions
     SelectUpgrade(UpgradeChoice),
 }
 
@@ -71,22 +64,17 @@ pub enum MenuSystemSet {
     Confirmation,
 }
 
-// Systems for all menus
-pub fn menu_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    mut menu_query: Query<(&MenuType, &mut MenuItem)>,
+pub fn spawn_level_up_menu(
+    mut commands: Commands,
+    upgrade_pool: Res<UpgradePool>,
+    existing_menu: Query<Entity, With<MenuRoot>>,
 ) {
-    // Handle common input behaviors
-}
+    if !existing_menu.is_empty() {
+        return;
+    }
 
-pub fn spawn_level_up_menu(mut commands: Commands, upgrade_pool: Res<UpgradePool>) {
     // Generate 3 random upgrade choices
     let choices = upgrade_pool.generate_choices(3);
-    info!("Generated {} upgrade choices", choices.len());
-    for choice in choices.iter() {
-        info!("Choice: {:?}", choice.upgrade_type);
-    }
 
     commands
         .spawn((
@@ -105,7 +93,9 @@ pub fn spawn_level_up_menu(mut commands: Commands, upgrade_pool: Res<UpgradePool
                 background_color: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
                 ..default()
             },
-            MenuRoot,
+            MenuRoot {
+                menu_type: MenuType::LevelUp,
+            },
             MenuType::LevelUp,
         ))
         .with_children(|parent| {
@@ -155,9 +145,9 @@ pub(crate) fn get_rarity_color(rarity: &Rarity) -> Color {
 }
 
 // Navigation systems
-pub fn standard_menu_navigation(
+pub fn menu_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut menu_query: Query<(Entity, &mut MenuItem, &MenuActionComponent)>,
+    mut menu_query: Query<(Entity, &mut MenuItem, &MenuActionComponent, &Parent), With<Button>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let mut items: Vec<_> = menu_query.iter_mut().collect();
@@ -169,7 +159,7 @@ pub fn standard_menu_navigation(
     // Find currently selected item
     let current_selected = items
         .iter()
-        .position(|(_, item, _)| item.selected)
+        .position(|(_, item, _, _)| item.selected)
         .unwrap_or(0);
 
     // Calculate new selected index
@@ -185,89 +175,27 @@ pub fn standard_menu_navigation(
     };
 
     // Update selection states
-    for (i, (_, ref mut item, _)) in items.iter_mut().enumerate() {
+    for (i, (_, ref mut item, _, _)) in items.iter_mut().enumerate() {
         item.selected = i == new_selected;
     }
 
     // Handle selection
     if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
-        if let Some((_, _, action_component)) = items.get(new_selected) {
+        if let Some((_, _, action_component, _)) = items.get(new_selected) {
             handle_menu_action(&action_component.action, &mut next_state);
         }
-    }
-}
-
-pub fn level_up_menu_navigation(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    mut menu_query: Query<(&MenuType, &mut MenuItem, &MenuActionComponent)>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    let mut items: Vec<_> = menu_query
-        .iter_mut()
-        .filter(|(menu_type, _, _)| matches!(menu_type, MenuType::LevelUp))
-        .collect();
-
-    if items.is_empty() {
-        return;
-    }
-
-    // Similar navigation logic to standard_menu_navigation
-    let current_selected = items
-        .iter()
-        .position(|(_, item, _)| item.selected)
-        .unwrap_or(0);
-
-    // Calculate new selected index
-    let items_len = items.len();
-    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp)
-        || keyboard.just_pressed(KeyCode::KeyW)
-    {
-        (current_selected + items_len - 1) % items_len
-    } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
-        (current_selected + 1) % items_len
-    } else {
-        current_selected
-    };
-
-    // Update selection states
-    for (i, (_, ref mut item, _)) in items.iter_mut().enumerate() {
-        item.selected = i == new_selected;
-    }
-
-    // Handle selection (Enter or Space)
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
-        if let Some((_, _, action_component)) = items.get(current_selected) {
-            handle_menu_action(&action_component.action, &mut next_state);
-        }
-    }
-}
-
-pub fn cleanup_menu(mut commands: Commands, menu_query: Query<Entity, With<MenuRoot>>) {
-    for entity in menu_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-}
-
-// Helper functions
-fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>) {
-    match action {
-        MenuAction::StartGame => next_state.set(GameState::Playing),
-        MenuAction::ResumeGame => next_state.set(GameState::Playing),
-        MenuAction::OpenSettings => {
-            // For now, just return to Playing state since Settings isn't implemented
-            println!("Settings menu not yet implemented!");
-            next_state.set(GameState::Playing);
-            // When implementing settings, use:
-            // next_state.set(GameState::Settings);
-        }
-        MenuAction::QuitGame => next_state.set(GameState::Quit),
-        MenuAction::SelectUpgrade(_) => {} // Handled elsewhere
     }
 }
 
 // Basic pause menu spawning system
-pub fn spawn_pause_menu(mut commands: Commands) {
+pub fn spawn_pause_menu(mut commands: Commands, existing_menu: Query<(Entity, &MenuRoot)>) {
+    for (entity, root) in existing_menu.iter() {
+        info!(
+            "Found existing menu: {:?} of type {:?}",
+            entity, root.menu_type
+        );
+    }
+    
     commands
         .spawn((
             NodeBundle {
@@ -282,30 +210,15 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                 background_color: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
                 ..default()
             },
-            MenuRoot,
-            MenuType::Pause,
+            MenuRoot {
+                menu_type: MenuType::Pause,
+            },
         ))
         .with_children(|parent| {
-            parent
-                .spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(10.0),
-                        padding: UiRect::all(Val::Px(20.0)),
-                        ..default()
-                    },
-                    background_color: BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                    ..default()
-                })
-                .with_children(|parent| {
-                    // Resume button
-                    spawn_menu_button(parent, "Resume", MenuAction::ResumeGame, true);
-                    // Settings button
-                    spawn_menu_button(parent, "Settings", MenuAction::OpenSettings, false);
-                    // Quit button
-                    spawn_menu_button(parent, "Quit", MenuAction::QuitGame, false);
-                });
+            spawn_menu_container(parent, |parent| {
+                spawn_menu_button(parent, "Resume", MenuAction::ResumeGame, true);
+                spawn_menu_button(parent, "Quit", MenuAction::QuitGame, false);
+            });
         });
 }
 
@@ -344,44 +257,112 @@ pub fn spawn_menu_button(
         });
 }
 
+pub fn spawn_menu_container(
+    parent: &mut ChildBuilder,
+    spawn_content: impl FnOnce(&mut ChildBuilder),
+) {
+    parent
+        .spawn(NodeBundle {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(20.0),
+                padding: UiRect::all(Val::Px(30.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+            background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+            ..default()
+        })
+        .with_children(|parent| {
+            spawn_content(parent);
+        });
+}
+
+pub fn cleanup_menu_state(
+    mut commands: Commands,
+    query: Query<Entity, (With<MenuRoot>, Without<MarkedForDespawn>)>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
 pub fn update_menu_buttons(
     mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, &Interaction)>,
     mut text_query: Query<&mut Text>,
 ) {
     for (menu_item, mut background_color, children, interaction) in buttons.iter_mut() {
-        // Determine background color based on state
-        let bg_color = match *interaction {
-            Interaction::Pressed => Color::srgb(0.2, 0.2, 0.2),
-            Interaction::Hovered => Color::srgb(0.4, 0.4, 0.4),
-            Interaction::None => {
-                if menu_item.selected {
-                    Color::srgb(0.35, 0.35, 0.4)
-                } else {
-                    Color::srgb(0.3, 0.3, 0.3)
-                }
-            }
+        // Enhanced visual feedback
+        let bg_color = match (*interaction, menu_item.selected) {
+            (Interaction::Pressed, _) => Color::srgb(0.2, 0.2, 0.2),
+            (Interaction::Hovered, _) => Color::srgb(0.4, 0.4, 0.4),
+            (Interaction::None, true) => Color::srgb(0.35, 0.35, 0.4),
+            (Interaction::None, false) => Color::srgb(0.3, 0.3, 0.3),
         };
         background_color.0 = bg_color;
 
-        // Update text color if this button has child text
+        // Update text color
         if let Some(&child) = children.first() {
             if let Ok(mut text) = text_query.get_mut(child) {
-                text.sections[0].style.color = if menu_item.selected {
-                    Color::srgb(1.0, 1.0, 0.0)
-                } else {
-                    Color::WHITE
-                };
+                text.sections[0].style.color =
+                    if menu_item.selected || matches!(interaction, Interaction::Hovered) {
+                        Color::srgb(1.0, 0.84, 0.0)
+                    } else {
+                        Color::WHITE
+                    };
             }
         }
     }
 }
 
-pub fn handle_upgrade_selection(
+pub fn handle_menu_interactions(
+    mut buttons: Query<(&Interaction, &mut MenuItem, &MenuActionComponent), With<Button>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    for (interaction, mut menu_item, action_component) in buttons.iter_mut() {
+        // Only modify selection via mouse if the item isn't already selected via keyboard
+        match *interaction {
+            Interaction::Pressed => {
+                handle_menu_action(&action_component.action, &mut next_state);
+            }
+            Interaction::Hovered => {
+                // Only update selection via hover if not already selected (preserves keyboard selection)
+                if !menu_item.selected {
+                    menu_item.selected = true;
+                }
+            }
+            Interaction::None => {
+                // Only deselect if this was a mouse selection (hover)
+                // This preserves keyboard selection
+                if menu_item.selected && button_was_hovered(interaction) {
+                    menu_item.selected = false;
+                }
+            }
+        }
+    }
+}
+
+fn button_was_hovered(interaction: &Interaction) -> bool {
+    matches!(interaction, Interaction::Hovered)
+}
+
+fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>) {
+    match action {
+        MenuAction::StartGame => next_state.set(GameState::Playing),
+        MenuAction::ResumeGame => next_state.set(GameState::Playing),
+        // MenuAction::OpenSettings => next_state.set(GameState::Playing), // Until settings is implemented
+        MenuAction::QuitGame => next_state.set(GameState::Quit),
+        MenuAction::SelectUpgrade(_) => {} // Handled by upgrade system
+    }
+}
+
+pub fn handle_upgrade_selection_and_confirmation(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
     menu_query: Query<(Entity, &MenuType)>,
-    menu_items: Query<(Entity, &MenuItem, &MenuActionComponent, &Interaction)>,
+    menu_items: Query<(&MenuItem, &MenuActionComponent, &Interaction)>,
     mut next_state: ResMut<NextState<GameState>>,
     mut upgrade_events: EventWriter<UpgradeConfirmedEvent>,
 ) {
@@ -394,7 +375,7 @@ pub fn handle_upgrade_selection(
     }
 
     // Handle confirmation via keyboard or mouse
-    for (entity, menu_item, action_component, interaction) in menu_items.iter() {
+    for (menu_item, action_component, interaction) in menu_items.iter() {
         let should_confirm = (menu_item.selected
             && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
             || *interaction == Interaction::Pressed;
@@ -419,121 +400,37 @@ pub fn handle_upgrade_selection(
     }
 }
 
-fn handle_upgrade_confirmation(
-    commands: &mut Commands,
-    next_state: &mut NextState<GameState>,
-    upgrade_events: &mut EventWriter<UpgradeConfirmedEvent>,
-    upgrade: UpgradeChoice,
-    menu_query: Query<(Entity, &MenuType)>,
-) {
-    // Send the upgrade event
-    upgrade_events.send(UpgradeConfirmedEvent { upgrade });
-
-    // Clean up menu
-    for (entity, _) in menu_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-
-    // Return to playing state
-    next_state.set(GameState::Playing);
-}
-
-fn get_selected_upgrade(
-    menu_items: &Query<(&Interaction, &MenuActionComponent), Changed<Interaction>>,
-) -> Option<UpgradeChoice> {
-    for (interaction, action) in menu_items.iter() {
-        if *interaction == Interaction::Hovered {
-            if let MenuAction::SelectUpgrade(ref upgrade) = action.action {
-                return Some(upgrade.clone());
-            }
-        }
-    }
-    None
-}
-
-pub fn get_selected_menu_action(
-    menu_items: &Query<(&MenuItem, &MenuActionComponent)>,
-) -> Option<MenuAction> {
-    for (item, action_component) in menu_items.iter() {
-        if item.selected {
-            return Some(action_component.action.clone());
-        }
-    }
-    None
-}
-
 // Plugin to organize it all
 pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        // Add our event
-        app.add_event::<UpgradeConfirmedEvent>();
-
-        // Configure our system sets
-        app.configure_sets(
-            Update,
-            (
-                MenuSystemSet::Navigation,
-                MenuSystemSet::Selection,
-                MenuSystemSet::Confirmation,
+        app.add_event::<UpgradeConfirmedEvent>()
+            .configure_sets(
+                Update,
+                (
+                    MenuSystemSet::Navigation,
+                    MenuSystemSet::Selection,
+                    MenuSystemSet::Confirmation,
+                )
+                    .chain(),
             )
-                .chain(),
-        );
-
-        app.add_systems(Startup, add_upgrade_tracking);
-
-        // Add systems for the level up menu state
-        app.add_systems(
-            Update,
-            (
-                menu_hover_system,
-                standard_menu_navigation,
-                handle_upgrade_selection,
-                update_menu_buttons,
-                apply_confirmed_upgrade,
+            // Menu systems
+            .add_systems(
+                Update,
+                (
+                    menu_navigation,
+                    handle_menu_interactions,
+                    update_menu_buttons,
+                    handle_upgrade_selection_and_confirmation,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
             )
-                .chain() // Use chain() to ensure sequential execution
-                .run_if(in_state(GameState::LevelUp)),
-        );
-
-        // Add systems for the pause menu state
-        app.add_systems(
-            Update,
-            (
-                standard_menu_navigation,
-                handle_button_interactions,
-                update_menu_buttons,
-            )
-                .chain()
-                .run_if(in_state(GameState::Paused)),
-        );
+            // State transitions
+            .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
+            .add_systems(OnExit(GameState::Paused), cleanup_menu_state)
+            .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
+            .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state);
     }
-}
-
-fn menu_hover_system(mut buttons: Query<(&Interaction, &mut MenuItem)>) {
-    for (interaction, mut menu_item) in buttons.iter_mut() {
-        // Only update selection on hover if not already selected by keyboard
-        if !menu_item.selected {
-            menu_item.selected = matches!(interaction, Interaction::Hovered);
-        }
-    }
-}
-
-fn handle_button_interactions(
-    mut next_state: ResMut<NextState<GameState>>,
-    buttons: Query<(&Interaction, &MenuItem, &MenuActionComponent), Changed<Interaction>>,
-) {
-    for (interaction, _, action_component) in buttons.iter() {
-        if *interaction == Interaction::Pressed {
-            handle_menu_action(&action_component.action, &mut next_state);
-        }
-    }
-}
-
-// Helper function to determine if we're in level-up menu
-pub fn in_level_up_menu(menu_query: Query<&MenuType>) -> bool {
-    menu_query
-        .iter()
-        .any(|menu_type| matches!(menu_type, MenuType::LevelUp))
 }
