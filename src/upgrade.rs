@@ -1,12 +1,14 @@
-use crate::menu::{MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent, UpgradeType};
-use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
-use bevy::prelude::*;
-use bevy::hierarchy::{BuildChildren, ChildBuilder};
-use bevy::color::{Alpha, Color};
-use bevy::log::info;
-use bevy::utils::HashMap;
 use crate::components::{Player, PlayerStats};
 use crate::menu;
+use crate::menu::{
+    MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent, UpgradeType,
+};
+use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
+use bevy::color::{Alpha, Color};
+use bevy::hierarchy::{BuildChildren, ChildBuilder};
+use bevy::log::info;
+use bevy::prelude::*;
+use bevy::utils::HashMap;
 
 #[derive(Resource)]
 pub struct UpgradePool {

@@ -1,11 +1,7 @@
-use bevy::math::FloatOrd;
-use crate::components::{Combat, Enemy, Health, Player, Projectile};
+use crate::components::{Combat, Health, Player};
 use crate::death::MarkedForDeath;
+use crate::weapon::{spawn_circle_magick, PatternType};
 use bevy::prelude::*;
-use bevy_rapier2d::dynamics::{Dominance, LockedAxes, RigidBody, Velocity};
-use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group};
-use bevy_rapier2d::math::Vect;
-use crate::resources::GameTextures;
 
 #[derive(Event)]
 pub struct DamageEvent {
@@ -18,6 +14,21 @@ pub struct DamageEvent {
 pub struct LastDamageTime {
     pub time: f32,
     pub cooldown: f32,
+}
+
+#[derive(Component)]
+pub struct DamageCooldown {
+    pub time: f32,
+    pub cooldown: f32,
+}
+
+impl Default for DamageCooldown {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            cooldown: 0.25, // Default to 0.25s between damage
+        }
+    }
 }
 
 impl Default for LastDamageTime {
@@ -48,84 +59,73 @@ impl ProjectileStats {
     }
 }
 
-pub fn combat_system(
+pub fn circle_combat_system(
     mut commands: Commands,
-    game_textures: Res<GameTextures>,
     time: Res<Time<Virtual>>,
     mut player_query: Query<(&Transform, &mut Combat), With<Player>>,
-    enemy_query: Query<(Entity, &Transform), With<Enemy>>,
 ) {
     for (player_transform, mut combat) in player_query.iter_mut() {
+        // Check if enough time has passed since last attack based on attack speed
         if time.elapsed_seconds() - combat.last_attack >= 1.0 / combat.attack_speed {
-            if let Some((_, enemy_transform)) = enemy_query.iter().min_by_key(|(_, transform)| {
-                FloatOrd((transform.translation - player_transform.translation).length())
-            }) {
-                let direction =
-                    (enemy_transform.translation - player_transform.translation).normalize();
-                let velocity = Vect::new(direction.x, direction.y);
+            // Spawn a circle at the player's position
+            spawn_circle_magick(
+                &mut commands,
+                player_transform.translation,
+                PatternType::Banishment,
+            );
 
-                commands.spawn((
-                    Projectile {
-                        speed: 300.0,
-                    },
-                    ProjectileStats::new(combat.attack_damage, 1), // Store damage here only
-                    SpriteBundle {
-                        texture: game_textures.projectiles.clone(),
-                        sprite: Sprite {
-                            custom_size: Some(Vec2::new(16.0, 16.0)),
-                            ..default()
-                        },
-                        transform: Transform::from_translation(player_transform.translation),
-                        ..default()
-                    },
-                    TextureAtlas {
-                        layout: game_textures.projectiles_layout.clone(),
-                        index: 0,
-                    },
-                    RigidBody::Dynamic,
-                    Collider::ball(8.0),
-                    LockedAxes::ROTATION_LOCKED,
-                    ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
-                    Velocity::linear(velocity * 300.0),
-                    Dominance::group(5),
-                ));
-
-                combat.last_attack = time.elapsed_seconds();
-            }
+            // Update last attack time
+            combat.last_attack = time.elapsed_seconds();
         }
     }
 }
 
 pub fn handle_damage(
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
     mut commands: Commands,
     mut damage_events: EventReader<DamageEvent>,
     mut health_query: Query<&mut Health>,
-    mut last_damage_query: Query<&mut LastDamageTime>,
+    mut cooldown_query: Query<&mut DamageCooldown>,
 ) {
     for event in damage_events.read() {
-        // Check damage cooldown
-        if let Ok(mut last_damage) = last_damage_query.get_mut(event.target) {
-            let current_time = time.elapsed_seconds();
-            if current_time - last_damage.time < last_damage.cooldown {
-                continue;
+        info!("Processing damage event for {:?}, amount: {}", event.target, event.amount);
+
+        let current_time = time.elapsed_seconds();
+
+        // Check for cooldown
+        let should_damage = if let Ok(mut cooldown) = cooldown_query.get_mut(event.target) {
+            let can_damage = current_time - cooldown.time >= cooldown.cooldown;
+            if !can_damage {
+                info!("Cooldown active. Current: {}, Last: {}, Diff: {}, Need: {}", 
+                    current_time, cooldown.time, 
+                    current_time - cooldown.time, cooldown.cooldown);
+            } else {
+                cooldown.time = current_time;
+                info!("Updated cooldown time to: {}", current_time);
             }
-            last_damage.time = current_time;
+            can_damage
         } else {
-            // If entity doesn't have LastDamageTime, add it
-            commands
-                .entity(event.target)
-                .insert(LastDamageTime::default());
+            info!("No cooldown component - damage allowed");
+            true
+        };
+
+        if !should_damage {
+            continue;
         }
 
         // Apply damage
         if let Ok(mut health) = health_query.get_mut(event.target) {
+            let old_health = health.current;
             health.current -= event.amount;
+            info!("Health changed from {} to {} for {:?}", 
+                  old_health, health.current, event.target);
 
             if health.current <= 0.0 {
+                info!("Marking {:?} for death at health {}", event.target, health.current);
                 commands.entity(event.target).insert(MarkedForDeath);
             }
+        } else {
+            info!("No health component found for {:?}", event.target);
         }
     }
 }

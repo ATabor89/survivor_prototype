@@ -1,7 +1,7 @@
-use bevy::prelude::*;
 use crate::components::{Enemy, Health, Player};
 use crate::events::EntityDeathEvent;
 use crate::resources::{GameState, GameStats};
+use bevy::prelude::*;
 
 #[derive(Component)]
 pub struct MarkedForDeath;

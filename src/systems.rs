@@ -1,3 +1,4 @@
+use crate::combat::DamageCooldown;
 use crate::components::{Combat, Enemy, Experience, Health, Player};
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::prelude::*;
@@ -173,6 +174,7 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
             current: 100.0,
             maximum: 100.0,
         },
+        DamageCooldown::default(),
     ));
 
     commands.spawn(Camera2dBundle::default());

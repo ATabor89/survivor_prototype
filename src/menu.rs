@@ -195,7 +195,7 @@ pub fn spawn_pause_menu(mut commands: Commands, existing_menu: Query<(Entity, &M
             entity, root.menu_type
         );
     }
-    
+
     commands
         .spawn((
             NodeBundle {

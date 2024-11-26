@@ -10,8 +10,9 @@ mod systems;
 mod types;
 mod ui;
 mod upgrade;
+mod weapon;
 
-use crate::combat::{combat_system, handle_damage, DamageEvent};
+use crate::combat::{circle_combat_system, handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
 use crate::events::EntityDeathEvent;
 use crate::experience::ExperiencePlugin;
@@ -23,6 +24,7 @@ use crate::systems::{
     spawn_enemies, spawn_player, universal_input_system,
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
+use crate::weapon::update_circle_magick;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use upgrade::UpgradePool;
@@ -81,6 +83,7 @@ impl Plugin for SurvivorsGamePlugin {
                 (
                     // Combat
                     handle_damage,
+                    update_circle_magick,
                     death_system,
                 )
                     .in_set(GameplaySets::Combat)
@@ -106,7 +109,7 @@ impl Plugin for SurvivorsGamePlugin {
                         .in_set(GameplaySets::Spawning)
                         .run_if(in_state(GameState::Playing)),
                     // Combat
-                    combat_system
+                    circle_combat_system
                         .in_set(GameplaySets::Combat)
                         .run_if(in_state(GameState::Playing)),
                 ),

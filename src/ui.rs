@@ -1,6 +1,6 @@
 use crate::components::{Health, Player};
-use bevy::prelude::*;
 use crate::resources::GameStats;
+use bevy::prelude::*;
 
 // Root node marker
 #[derive(Component)]
@@ -117,12 +117,12 @@ pub fn spawn_ui(mut commands: Commands) {
                         ..default()
                     },
                 )
-                    .with_style(Style {
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(10.0),
-                        top: Val::Px(10.0),
-                        ..default()
-                    }),
+                .with_style(Style {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(10.0),
+                    top: Val::Px(10.0),
+                    ..default()
+                }),
                 KillCounter,
             ));
         });

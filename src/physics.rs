@@ -2,9 +2,9 @@ use crate::combat::{DamageEvent, ProjectileStats};
 use crate::components::{Enemy, Player, Projectile};
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::resources::GameState;
+use crate::GameplaySets;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
-use crate::GameplaySets;
 
 pub struct PhysicsPlugin;
 
@@ -37,7 +37,11 @@ impl Plugin for PhysicsPlugin {
 
         app.add_systems(
             Update,
-            (setup_physics_bodies, handle_player_enemy_collision, handle_projectile_collision)
+            (
+                setup_physics_bodies,
+                handle_player_enemy_collision,
+                handle_projectile_collision,
+            )
                 .chain()
                 .in_set(GameplaySets::Physics)
                 .run_if(in_state(GameState::Playing)),
