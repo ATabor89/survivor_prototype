@@ -2,6 +2,10 @@ use crate::combat::DamageEvent;
 use crate::components::Enemy;
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use bevy::prelude::*;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::sprite::MaterialMesh2dBundle;
+use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
 
 // Core trait for weapon behavior
@@ -102,37 +106,33 @@ pub fn spawn_circle_magick(
     pattern_type: PatternType,
 ) -> Entity {
     let circle_radius = 64.0;
-    let circle_group = Group::GROUP_3;
-    let enemy_group = Group::GROUP_2;
 
-    // Create a basic circle texture (a filled circle with transparency)
     let circle = commands
         .spawn((
-            CircleMagickBundle {
-                circle: CircleMagick {
-                    pattern_type,
-                    ..default()
-                },
-                sprite: SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::srgba(0.5, 0.5, 1.0, 0.3),
-                        // Make sure sprite size matches the collider diameter
-                        custom_size: Some(Vec2::new(circle_radius * 2.0, circle_radius * 2.0)),
-                        ..default()
-                    },
-                    transform: Transform::from_translation(position),
-                    ..default()
-                },
+            ShapeBundle {
+                path: GeometryBuilder::new()
+                    .add(&shapes::Circle {
+                        radius: circle_radius,
+                        center: Vec2::ZERO,
+                    })
+                    .build(),
+                spatial: SpatialBundle::from_transform(Transform::from_translation(position)),
+                ..default()
+            },
+            Fill::color(Color::srgba(0.5, 0.5, 1.0, 0.3)),
+            CircleMagick {
+                pattern_type,
+                ..default()
             },
             Sensor,
-            Collider::ball(circle_radius), // Radius matches sprite size
+            Collider::ball(circle_radius),
             ActiveEvents::COLLISION_EVENTS,
-            CollisionGroups::new(circle_group, enemy_group),
+            CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
         ))
         .id();
 
     // Sigil size relative to circle size
-    let sigil_size = circle_radius * 0.25; // 1/4 the radius of the circle
+    let sigil_size = circle_radius * 0.25;
 
     // Spawn rotating sigils
     for i in 0..4 {
@@ -144,17 +144,19 @@ pub fn spawn_circle_magick(
                 parent_circle: circle,
                 index: i,
             },
-            SpriteBundle {
-                sprite: Sprite {
-                    color: Color::rgba(0.7, 0.7, 1.0, 0.8),
-                    custom_size: Some(Vec2::new(sigil_size, sigil_size)),
-                    ..default()
-                },
-                transform: Transform::from_translation(
-                    position + Vec3::new(offset.x, offset.y, 0.1),
-                ),
+            ShapeBundle {
+                path: GeometryBuilder::new()
+                    .add(&shapes::Rectangle {
+                        extents: Vec2::splat(sigil_size),
+                        origin: RectangleOrigin::Center,
+                    })
+                    .build(),
+                spatial: SpatialBundle::from_transform(Transform::from_translation(
+                    position + Vec3::new(offset.x, offset.y, 0.1)
+                )),
                 ..default()
             },
+            Fill::color(Color::srgba(0.7, 0.7, 1.0, 0.8)),
         ));
     }
 

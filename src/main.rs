@@ -27,6 +27,7 @@ use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, updat
 use crate::weapon::update_circle_magick;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
+use bevy_prototype_lyon::prelude::ShapePlugin;
 use upgrade::UpgradePool;
 
 // First, let's organize our systems into sets for better control
@@ -163,6 +164,7 @@ fn main() {
                 }),
         )
         // .add_plugins(DefaultPlugins)
+        .add_plugins(ShapePlugin)
         .add_plugins(SurvivorsGamePlugin)
         .run();
 }
