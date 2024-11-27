@@ -91,7 +91,7 @@ pub fn gameplay_movement_system(
 
         if direction != Vec3::ZERO {
             direction = direction.normalize();
-            transform.translation += direction * player.speed * time.delta_seconds();
+            transform.translation += direction * player.speed * time.delta_secs();
         }
     }
 }
@@ -113,22 +113,24 @@ pub fn universal_input_system(
 }
 
 pub fn handle_pause_state(
-    mut rapier_config: ResMut<RapierConfiguration>,
+    mut config_query: Query<&mut RapierConfiguration>,
     mut time: ResMut<Time<Virtual>>,
     game_state: Res<State<GameState>>,
 ) {
-    match game_state.get() {
-        GameState::Playing => {
-            // Resume physics and time
-            rapier_config.physics_pipeline_active = true;
-            time.unpause();
+    if let Ok(mut rapier_config) = config_query.get_single_mut() {
+        match game_state.get() {
+            GameState::Playing => {
+                // Resume physics and time
+                rapier_config.physics_pipeline_active = true;
+                time.unpause();
+            }
+            GameState::Paused | GameState::LevelUp | GameState::GameOver => {
+                // Pause physics and time for any state where the game should be frozen
+                rapier_config.physics_pipeline_active = false;
+                time.pause();
+            }
+            _ => {} // Other states don't affect physics/time
         }
-        GameState::Paused | GameState::LevelUp | GameState::GameOver => {
-            // Pause physics and time for any state where the game should be frozen
-            rapier_config.physics_pipeline_active = false;
-            time.pause();
-        }
-        _ => {} // Other states don't affect physics/time
     }
 }
 
@@ -147,19 +149,16 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
             magnet_strength: 150.0, // Base vacuum range
             magnet_speed: 1.0,      // Base vacuum speed multiplier
         },
-        SpriteBundle {
-            texture: game_textures.player.clone(),
-            sprite: Sprite {
-                custom_size: Some(Vec2::new(32.0, 32.0)),
-                ..default()
-            },
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+        Sprite {
+            image: game_textures.player.clone(),
+            custom_size: Some(Vec2::new(32.0, 32.0)),
+            texture_atlas: Some(TextureAtlas {
+                layout: game_textures.player_layout.clone(),
+                index: 0,
+            }),
             ..default()
         },
-        TextureAtlas {
-            layout: game_textures.player_layout.clone(),
-            index: 0,
-        },
+        Transform::from_xyz(0.0, 0.0, 0.0),
         Combat {
             attack_damage: 10.0,
             attack_speed: 0.60,
@@ -177,7 +176,7 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         DamageCooldown::default(),
     ));
 
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2d::default());
 }
 
 pub fn spawn_enemies(
@@ -214,19 +213,16 @@ pub fn spawn_enemies(
                 speed: 100.0,
                 experience_value: 50,
             },
-            SpriteBundle {
-                texture: game_textures.enemies.clone(),
-                sprite: Sprite {
-                    custom_size: Some(Vec2::new(32.0, 32.0)),
-                    ..default()
-                },
-                transform: Transform::from_translation(spawn_position),
+            Sprite {
+                image: game_textures.enemies.clone(),
+                custom_size: Some(Vec2::new(32.0, 32.0)),
+                texture_atlas: Some(TextureAtlas {
+                    layout: game_textures.enemies_layout.clone(),
+                    index: sprite_index,
+                }),
                 ..default()
             },
-            TextureAtlas {
-                layout: game_textures.enemies_layout.clone(),
-                index: sprite_index,
-            },
+            Transform::from_translation(spawn_position),
             Health {
                 current: 20.0,
                 maximum: 20.0,

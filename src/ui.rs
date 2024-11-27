@@ -22,14 +22,11 @@ pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
     commands
         .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    padding: UiRect::all(Val::Px(10.0)),
-                    ..default()
-                },
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                padding: UiRect::all(Val::Px(10.0)),
                 ..default()
             },
             GameUI,
@@ -37,63 +34,51 @@ pub fn spawn_ui(mut commands: Commands) {
         .with_children(|parent| {
             // Health bar container
             parent
-                .spawn(NodeBundle {
-                    style: Style {
+                .spawn((
+                    Node {
                         width: Val::Px(200.0),
                         height: Val::Px(30.0),
                         border: UiRect::all(Val::Px(2.0)),
+
                         ..default()
                     },
-                    border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
-                    background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
-                    ..default()
-                })
+                    BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+                ))
                 .with_children(|parent| {
                     // The actual health bar
                     parent.spawn((
-                        NodeBundle {
-                            style: Style {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            background_color: BackgroundColor(Color::srgb(0.8, 0.2, 0.2)),
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
                             ..default()
                         },
+                        BackgroundColor(Color::srgb(0.8, 0.2, 0.2)),
                         HealthBar,
                     ));
                 });
 
             // Health text
             parent.spawn((
-                TextBundle::from_section(
-                    "100/100",
-                    TextStyle {
-                        font_size: 24.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                )
-                .with_style(Style {
+                Text::new("100/100"),
+                Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(220.0),
                     top: Val::Px(2.0),
                     ..default()
-                }),
+                },
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
                 HealthText,
             ));
 
             // Game Timer
             parent.spawn((
-                TextBundle::from_section(
-                    "00:00",
-                    TextStyle {
-                        font_size: 32.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                )
-                .with_style(Style {
+                Text::new("00:00"),
+                Node {
                     position_type: PositionType::Absolute,
                     left: Val::Percent(50.0),
                     top: Val::Px(10.0),
@@ -103,26 +88,29 @@ pub fn spawn_ui(mut commands: Commands) {
                         ..default()
                     },
                     ..default()
-                }),
+                },
+                TextFont {
+                    font_size: 32.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
                 GameTimer,
             ));
 
             // Kill Counter
             parent.spawn((
-                TextBundle::from_section(
-                    "Kills: 0",
-                    TextStyle {
-                        font_size: 24.0,
-                        color: Color::WHITE,
-                        ..default()
-                    },
-                )
-                .with_style(Style {
+                Text::new("Kills: 0"),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                Node {
                     position_type: PositionType::Absolute,
                     right: Val::Px(10.0),
                     top: Val::Px(10.0),
                     ..default()
-                }),
+                },
+                TextColor(Color::WHITE),
                 KillCounter,
             ));
         });
@@ -139,15 +127,15 @@ pub fn update_game_timer(
     mut timer_query: Query<&mut Text, With<GameTimer>>,
 ) {
     if let Ok(mut text) = timer_query.get_single_mut() {
-        let total_secs = time.elapsed_seconds() as u32;
+        let total_secs = time.elapsed_secs() as u32;
         let minutes = total_secs / 60;
         let seconds = total_secs % 60;
-        text.sections[0].value = format!("{:02}:{:02}", minutes, seconds);
+        text.0 = format!("{:02}:{:02}", minutes, seconds);
     }
 }
 
 pub fn update_health_ui(
-    mut health_bar_query: Query<&mut Style, With<HealthBar>>,
+    mut health_bar_query: Query<&mut Node, With<HealthBar>>,
     mut health_text_query: Query<&mut Text, With<HealthText>>,
     player_query: Query<&Health, With<Player>>,
 ) {
@@ -160,7 +148,7 @@ pub fn update_health_ui(
 
         // Update health text
         if let Ok(mut text) = health_text_query.get_single_mut() {
-            text.sections[0].value = format!(
+            text.0 = format!(
                 "{}/{}",
                 player_health.current.ceil() as i32,
                 player_health.maximum as i32
@@ -174,6 +162,6 @@ pub fn update_kill_counter(
     mut kill_counter_query: Query<&mut Text, With<KillCounter>>,
 ) {
     if let Ok(mut text) = kill_counter_query.get_single_mut() {
-        text.sections[0].value = format!("Kills: {}", game_stats.enemies_killed);
+        text.0 = format!("Kills: {}", game_stats.enemies_killed);
     }
 }

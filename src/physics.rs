@@ -14,21 +14,12 @@ pub struct DamageSensor;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
-        // Base physics setup with custom configuration
-        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-            // Configure physics with no gravity
-            .insert_resource(RapierConfiguration {
-                gravity: Vec2::ZERO,
-                physics_pipeline_active: true,
-                query_pipeline_active: true,
-                timestep_mode: TimestepMode::Variable {
-                    max_dt: 1.0 / 60.0,
-                    time_scale: 1.0,
-                    substeps: 1,
-                },
-                scaled_shape_subdivision: 10,
-                force_update_from_transform_changes: false,
-            });
+        // Base physics setup
+        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
+
+        // Since RapierConfiguration is now a component, we'll need a startup system 
+        // to configure the physics world
+        app.add_systems(Startup, configure_physics);
 
         #[cfg(debug_assertions)]
         {
@@ -46,6 +37,16 @@ impl Plugin for PhysicsPlugin {
                 .in_set(GameplaySets::Physics)
                 .run_if(in_state(GameState::Playing)),
         );
+    }
+}
+
+fn configure_physics(mut config_query: Query<&mut RapierConfiguration>) {
+    if let Ok(mut config) = config_query.get_single_mut() {
+        config.gravity = Vec2::ZERO;
+        config.physics_pipeline_active = true;
+        config.query_pipeline_active = true;
+        config.scaled_shape_subdivision = 10;
+        config.force_update_from_transform_changes = false;
     }
 }
 
@@ -80,7 +81,7 @@ pub fn setup_physics_bodies(
                         Sensor,
                         ActiveEvents::COLLISION_EVENTS,
                         DamageSensor,
-                        TransformBundle::default(),
+                        Transform::default(),
                     ));
                 });
         }
@@ -119,7 +120,7 @@ pub fn setup_physics_bodies(
 }
 
 pub fn handle_player_enemy_collision(
-    rapier_context: Res<RapierContext>,
+    context_query: Query<&RapierContext>,
     time: Res<Time<Virtual>>,
     player_query: Query<(Entity, &Transform), With<Player>>,
     enemy_query: Query<
@@ -149,6 +150,10 @@ pub fn handle_player_enemy_collision(
 
     // Count intersecting enemies that aren't marked for death/despawn
     let mut intersecting_enemies = 0;
+    let Ok(rapier_context) = context_query.get_single() else {
+        panic!("Unable to get rapier_context");
+    };
+
     for (collider1, collider2, intersecting) in
         rapier_context.intersection_pairs_with(sensor_entity)
     {
@@ -212,7 +217,7 @@ pub fn handle_projectile_collision(
                     continue;
                 };
 
-            let current_time = time.elapsed_seconds();
+            let current_time = time.elapsed_secs();
 
             // Check pierce cooldown
             if current_time - projectile_stats.last_hit_time < projectile_stats.pierce_cooldown {

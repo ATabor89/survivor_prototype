@@ -78,21 +78,18 @@ pub fn spawn_level_up_menu(
 
     commands
         .spawn((
-            NodeBundle {
-                style: Style {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    ..default()
-                },
-                z_index: ZIndex::Global(100), // Ensure it's on top
-                background_color: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
                 ..default()
             },
+            GlobalZIndex(100), // Ensure it's on top
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
             MenuRoot {
                 menu_type: MenuType::LevelUp,
             },
@@ -101,8 +98,8 @@ pub fn spawn_level_up_menu(
         .with_children(|parent| {
             // Container for upgrade choices
             parent
-                .spawn(NodeBundle {
-                    style: Style {
+                .spawn((
+                    Node {
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(20.0),
@@ -111,19 +108,18 @@ pub fn spawn_level_up_menu(
                         border: UiRect::all(Val::Px(2.0)),
                         ..default()
                     },
-                    border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
-                    background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
-                    ..default()
-                })
+                    BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+                ))
                 .with_children(|parent| {
                     // Level Up Title
-                    parent.spawn(TextBundle::from_section(
-                        "Level Up!",
-                        TextStyle {
-                            font_size: 48.0,                   // Made larger
-                            color: Color::srgb(1.0, 0.8, 0.0), // Gold color
+                    parent.spawn((
+                        Text::new("Level Up!"),
+                        TextFont {
+                            font_size: 48.0, // Made larger
                             ..default()
                         },
+                        TextColor(Color::srgb(1.0, 0.8, 0.0)), // Gold color
                     ));
 
                     // Spawn upgrade choices
@@ -198,18 +194,15 @@ pub fn spawn_pause_menu(mut commands: Commands, existing_menu: Query<(Entity, &M
 
     commands
         .spawn((
-            NodeBundle {
-                style: Style {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                background_color: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
             MenuRoot {
                 menu_type: MenuType::Pause,
             },
@@ -231,28 +224,26 @@ pub fn spawn_menu_button(
 ) {
     parent
         .spawn((
-            ButtonBundle {
-                style: Style {
-                    width: Val::Px(200.0),
-                    height: Val::Px(50.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                background_color: BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+            Button { ..default() },
+            Node {
+                width: Val::Px(200.0),
+                height: Val::Px(50.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
+            BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
             MenuItem { selected },
             MenuActionComponent { action },
         ))
         .with_children(|parent| {
-            parent.spawn(TextBundle::from_section(
-                text,
-                TextStyle {
+            parent.spawn((
+                Text::new(text),
+                TextFont {
                     font_size: 20.0,
-                    color: Color::WHITE,
                     ..default()
                 },
+                TextColor(Color::WHITE),
             ));
         });
 }
@@ -262,8 +253,8 @@ pub fn spawn_menu_container(
     spawn_content: impl FnOnce(&mut ChildBuilder),
 ) {
     parent
-        .spawn(NodeBundle {
-            style: Style {
+        .spawn((
+            Node {
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(20.0),
@@ -271,10 +262,9 @@ pub fn spawn_menu_container(
                 border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            border_color: BorderColor(Color::srgb(0.7, 0.7, 0.7)),
-            background_color: BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
-            ..default()
-        })
+            BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+            BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
+        ))
         .with_children(|parent| {
             spawn_content(parent);
         });
@@ -291,7 +281,7 @@ pub fn cleanup_menu_state(
 
 pub fn update_menu_buttons(
     mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, &Interaction)>,
-    mut text_query: Query<&mut Text>,
+    mut text_query: Query<(&mut Text, &mut TextColor)>,
 ) {
     for (menu_item, mut background_color, children, interaction) in buttons.iter_mut() {
         // Enhanced visual feedback
@@ -305,13 +295,12 @@ pub fn update_menu_buttons(
 
         // Update text color
         if let Some(&child) = children.first() {
-            if let Ok(mut text) = text_query.get_mut(child) {
-                text.sections[0].style.color =
-                    if menu_item.selected || matches!(interaction, Interaction::Hovered) {
-                        Color::srgb(1.0, 0.84, 0.0)
-                    } else {
-                        Color::WHITE
-                    };
+            if let Ok((_, mut text_color)) = text_query.get_mut(child) {
+                text_color.0 = if menu_item.selected || matches!(interaction, Interaction::Hovered) {
+                    Color::srgb(1.0, 0.84, 0.0)
+                } else {
+                    Color::WHITE
+                };
             }
         }
     }
@@ -425,7 +414,7 @@ impl Plugin for MenuPlugin {
                     handle_upgrade_selection_and_confirmation,
                 )
                     .chain()
-                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
+                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
             )
             // State transitions
             .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)

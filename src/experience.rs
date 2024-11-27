@@ -60,15 +60,12 @@ fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<E
             commands.spawn((
                 ExperienceOrb { value: exp_value },
                 Vacuumable::default(),
-                SpriteBundle {
-                    sprite: Sprite {
+                Sprite {
                         color: Color::srgb(0.5, 0.8, 1.0),
                         custom_size: Some(Vec2::new(8.0, 8.0)),
                         ..default()
                     },
-                    transform: Transform::from_translation(event.position.extend(0.0)),
-                    ..default()
-                },
+                Transform::from_translation(event.position.extend(0.0)),
                 // Add Rapier components
                 RigidBody::Dynamic,
                 Collider::ball(4.0), // Smaller collision radius than visual
@@ -123,7 +120,7 @@ fn vacuum_system(
                 * (vacuum_influence * 2.0 + vacuum_influence.powi(3))
                 * magnet_speed;
 
-            item_transform.translation += vacuum_direction * speed * time.delta_seconds();
+            item_transform.translation += vacuum_direction * speed * time.delta_secs();
         }
     }
 }

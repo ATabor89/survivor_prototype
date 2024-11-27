@@ -2,9 +2,6 @@ use crate::combat::DamageEvent;
 use crate::components::Enemy;
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::sprite::MaterialMesh2dBundle;
 use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
 
@@ -83,7 +80,7 @@ pub struct CircleSigil {
 #[derive(Bundle)]
 pub struct CircleMagickBundle {
     pub circle: CircleMagick,
-    pub sprite: SpriteBundle,
+    pub sprite: Sprite,
     // Add any other components needed for visualization/collision
 }
 
@@ -116,7 +113,7 @@ pub fn spawn_circle_magick(
                         center: Vec2::ZERO,
                     })
                     .build(),
-                spatial: SpatialBundle::from_transform(Transform::from_translation(position)),
+                transform: Transform::from_translation(position),
                 ..default()
             },
             Fill::color(Color::srgba(0.5, 0.5, 1.0, 0.3)),
@@ -149,11 +146,12 @@ pub fn spawn_circle_magick(
                     .add(&shapes::Rectangle {
                         extents: Vec2::splat(sigil_size),
                         origin: RectangleOrigin::Center,
+                        radii: None,
                     })
                     .build(),
-                spatial: SpatialBundle::from_transform(Transform::from_translation(
-                    position + Vec3::new(offset.x, offset.y, 0.1)
-                )),
+                transform: Transform::from_translation(
+                position + Vec3::new(offset.x, offset.y, 0.1),
+                ),
                 ..default()
             },
             Fill::color(Color::srgba(0.7, 0.7, 1.0, 0.8)),
@@ -171,10 +169,10 @@ pub fn update_circle_magick(
         Query<(Entity, &CircleSigil, &mut Transform)>,
     )>,
     enemy_query: Query<&Enemy, (Without<MarkedForDeath>, Without<MarkedForDespawn>)>,
-    rapier_context: Res<RapierContext>,
+    context_query: Query<&RapierContext>,
     mut damage_events: EventWriter<DamageEvent>,
 ) {
-    let current_time = time.elapsed_seconds();
+    let current_time = time.elapsed_secs();
 
     // First, gather circle updates and find expired circles
     let mut circles_to_update = Vec::new();
@@ -184,7 +182,7 @@ pub fn update_circle_magick(
         let mut circle_query = param_set.p0();
         for (circle_entity, mut circle, circle_transform) in circle_query.iter_mut() {
             // Update circle lifetime
-            circle.active_time += time.delta_seconds();
+            circle.active_time += time.delta_secs();
             if circle.active_time >= circle.duration {
                 // Mark the circle for death
                 commands.entity(circle_entity).insert(MarkedForDeath);
@@ -197,6 +195,9 @@ pub fn update_circle_magick(
             // Apply damage effect if it's time
             if current_time - circle.last_effect_time >= circle.effect_interval {
                 let mut enemies_in_circle = 0;
+                let Ok(rapier_context) = context_query.get_single() else {
+                    panic!("Unable to get rapier_context");
+                };
 
                 for (collider1, collider2, intersecting) in
                     rapier_context.intersection_pairs_with(circle_entity)
@@ -226,7 +227,7 @@ pub fn update_circle_magick(
             }
 
             // Update rotation
-            circle.current_angle += circle.rotation_speed * time.delta_seconds();
+            circle.current_angle += circle.rotation_speed * time.delta_secs();
 
             circles_to_update.push((
                 circle_entity,

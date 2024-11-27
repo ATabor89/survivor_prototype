@@ -66,7 +66,7 @@ pub fn circle_combat_system(
 ) {
     for (player_transform, mut combat) in player_query.iter_mut() {
         // Check if enough time has passed since last attack based on attack speed
-        if time.elapsed_seconds() - combat.last_attack >= 1.0 / combat.attack_speed {
+        if time.elapsed_secs() - combat.last_attack >= 1.0 / combat.attack_speed {
             // Spawn a circle at the player's position
             spawn_circle_magick(
                 &mut commands,
@@ -75,7 +75,7 @@ pub fn circle_combat_system(
             );
 
             // Update last attack time
-            combat.last_attack = time.elapsed_seconds();
+            combat.last_attack = time.elapsed_secs();
         }
     }
 }
@@ -90,14 +90,14 @@ pub fn handle_damage(
     for event in damage_events.read() {
         info!("Processing damage event for {:?}, amount: {}", event.target, event.amount);
 
-        let current_time = time.elapsed_seconds();
+        let current_time = time.elapsed_secs();
 
         // Check for cooldown
         let should_damage = if let Ok(mut cooldown) = cooldown_query.get_mut(event.target) {
             let can_damage = current_time - cooldown.time >= cooldown.cooldown;
             if !can_damage {
-                info!("Cooldown active. Current: {}, Last: {}, Diff: {}, Need: {}", 
-                    current_time, cooldown.time, 
+                info!("Cooldown active. Current: {}, Last: {}, Diff: {}, Need: {}",
+                    current_time, cooldown.time,
                     current_time - cooldown.time, cooldown.cooldown);
             } else {
                 cooldown.time = current_time;
@@ -117,7 +117,7 @@ pub fn handle_damage(
         if let Ok(mut health) = health_query.get_mut(event.target) {
             let old_health = health.current;
             health.current -= event.amount;
-            info!("Health changed from {} to {} for {:?}", 
+            info!("Health changed from {} to {} for {:?}",
                   old_health, health.current, event.target);
 
             if health.current <= 0.0 {
