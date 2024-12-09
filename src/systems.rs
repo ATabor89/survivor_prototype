@@ -1,5 +1,5 @@
 use crate::combat::DamageCooldown;
-use crate::components::{Combat, Enemy, Experience, Health, Player};
+use crate::components::{AreaMultiplier, Combat, CooldownReduction, DamageMultiplier, Enemy, Experience, Health, Player};
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -149,6 +149,9 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
             magnet_strength: 150.0, // Base vacuum range
             magnet_speed: 1.0,      // Base vacuum speed multiplier
         },
+        CooldownReduction::default(),  // Will be 0.0
+        DamageMultiplier::default(),   // Will be 1.0
+        AreaMultiplier::default(),     // Will be 1.0
         Sprite {
             image: game_textures.player.clone(),
             custom_size: Some(Vec2::new(32.0, 32.0)),

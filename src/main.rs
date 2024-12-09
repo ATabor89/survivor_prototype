@@ -12,7 +12,7 @@ mod ui;
 mod upgrade;
 mod weapon;
 
-use crate::combat::{circle_combat_system, handle_damage, DamageEvent};
+use crate::combat::{handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
 use crate::events::EntityDeathEvent;
 use crate::experience::ExperiencePlugin;
@@ -24,11 +24,11 @@ use crate::systems::{
     spawn_enemies, spawn_player, universal_input_system,
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
-use crate::weapon::update_circle_magick;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::ShapePlugin;
 use upgrade::UpgradePool;
+use crate::weapon::WeaponPlugin;
 
 // First, let's organize our systems into sets for better control
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -62,6 +62,7 @@ impl Plugin for SurvivorsGamePlugin {
             .add_plugins(MenuPlugin)
             .add_plugins(PhysicsPlugin)
             .add_plugins(ExperiencePlugin)
+            .add_plugins(WeaponPlugin)
             // Startup systems
             .add_systems(Startup, (load_textures, spawn_player.after(load_textures)))
             // Configure system sets
@@ -84,7 +85,6 @@ impl Plugin for SurvivorsGamePlugin {
                 (
                     // Combat
                     handle_damage,
-                    update_circle_magick,
                     death_system,
                 )
                     .in_set(GameplaySets::Combat)
@@ -108,10 +108,6 @@ impl Plugin for SurvivorsGamePlugin {
                     // Spawning
                     spawn_enemies
                         .in_set(GameplaySets::Spawning)
-                        .run_if(in_state(GameState::Playing)),
-                    // Combat
-                    circle_combat_system
-                        .in_set(GameplaySets::Combat)
                         .run_if(in_state(GameState::Playing)),
                 ),
             )

@@ -1,14 +1,107 @@
 use crate::combat::DamageEvent;
-use crate::components::Enemy;
-use crate::death::{MarkedForDeath, MarkedForDespawn};
+use crate::components::{AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Player};
+use crate::death::MarkedForDeath;
+use crate::resources::GameState;
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
+use std::time::Duration;
+use bevy::ecs::query::QuerySingleError;
+use crate::physics::handle_rapier_context_error;
 
-// Core trait for weapon behavior
-trait WeaponEffect: Send + Sync + 'static {
-    fn update(&mut self, commands: &mut Commands, owner: Entity, transform: &Transform, time: f32);
-    fn on_hit(&mut self, commands: &mut Commands, entity: Entity, target: Entity);
+/// Plugin to register all weapon-related systems
+pub struct WeaponPlugin;
+
+impl Plugin for WeaponPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(OnEnter(GameState::Playing), setup_player_weapons)
+            .add_systems(
+                Update,
+                (
+                    weapon_firing_system,
+                    area_effect_system,
+                    attack_lifetime_system,
+                    attack_rotation_system,
+                    sigil_position_system,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::Playing)),
+            );
+    }
+}
+
+/// Core weapon type identifier
+#[derive(Component)]
+pub struct Weapon {
+    pub weapon_type: WeaponType,
+}
+
+#[derive(Component, Clone)]
+pub enum WeaponType {
+    MagickCircle,
+    // Future weapon types...
+}
+
+/// Base weapon statistics
+#[derive(Component)]
+pub struct WeaponCooldown {
+    pub timer: Timer,
+    pub base_duration: f32,
+}
+
+impl Default for WeaponCooldown {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
+            base_duration: 1.0,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct WeaponDamage {
+    pub base_amount: f32,
+}
+
+#[derive(Component)]
+pub struct WeaponArea {
+    pub base_radius: f32,
+}
+
+/// Attack-specific components
+#[derive(Component)]
+pub struct Attack {
+    pub attack_type: AttackType,
+}
+
+#[derive(Component, Clone)]
+pub enum AttackType {
+    MagickCircle,
+    // Future attack types...
+}
+
+#[derive(Component)]
+pub struct Lifetime {
+    pub timer: Timer,
+}
+
+#[derive(Component)]
+pub struct Rotates {
+    pub speed: f32,
+    pub current_angle: f32,
+}
+
+/// Specialized MagickCircle components
+#[derive(Component)]
+pub struct MagickCircle {
+    pub pattern_type: PatternType,
+    pub num_sigils: u32,
+}
+
+#[derive(Component)]
+pub struct Sigil {
+    pub index: u32,
+    pub base_size: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,87 +122,307 @@ pub enum SigilIntent {
     Reveal,
 }
 
+/// Optional weapon modifiers
 #[derive(Component)]
-pub struct CircleMagick {
-    // Core properties
-    pub radius: f32,
-    pub duration: f32, // How long the circle lasts
-    pub power: f32,    // Base effect strength
-
-    // Rotation mechanics
-    pub rotation_speed: f32,
-    pub current_angle: f32,
-
-    // Visual and effect properties
-    pub pattern_type: PatternType,
-    pub num_sigils: u32,   // Number of sigils around the circle
-    pub sigil_radius: f32, // Size of individual sigils
-    pub active_time: f32,  // How long it's been active
-
-    // Effect state
-    pub effect_interval: f32,  // How often to apply effects
-    pub last_effect_time: f32, // Track last effect application
+pub struct PiercingAttack {
+    pub pierce_count: u32,
 }
 
-impl Default for CircleMagick {
-    fn default() -> Self {
-        Self {
-            radius: 64.0,
-            duration: 5.0,
-            power: 10.0,
-            rotation_speed: 1.0,
-            current_angle: 0.0,
-            pattern_type: PatternType::Protection,
-            num_sigils: 4,
-            sigil_radius: 8.0,
-            active_time: 0.0,
-            effect_interval: 0.5,
-            last_effect_time: 0.0,
+#[derive(Component)]
+pub struct AreaEffect {
+    pub duration: f32,
+    pub tick_rate: f32,
+    pub last_tick: f32,
+}
+
+#[derive(Component)]
+pub struct Knockback {
+    pub force: f32,
+}
+
+/// System to give newly spawned players their starting weapon
+pub fn setup_player_weapons(
+    mut commands: Commands,
+    query: Query<Entity, (With<Player>, Added<Player>)>,
+) {
+    info!("Setup player weapons system running");
+    for player_entity in query.iter() {
+        info!("Setting up weapons for player: {:?}", player_entity);
+        spawn_weapon(&mut commands, player_entity, WeaponType::MagickCircle);
+    }
+}
+
+/// Spawns a weapon for the player based on weapon type
+pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType) {
+    match weapon_type {
+        WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity),
+        // Add other weapon types here
+    }
+}
+
+/// System to handle weapon firing logic
+pub fn weapon_firing_system(
+    mut commands: Commands,
+    time: Res<Time<Virtual>>,
+    // Query player stats
+    player_query: Query<
+        (
+            Entity,
+            &CooldownReduction,
+            &DamageMultiplier,
+            &AreaMultiplier,
+            &Transform,
+        ),
+        With<Player>,
+    >,
+    // Query weapons and their stats
+    mut weapon_query: Query<(
+        Entity,
+        &Parent,
+        &mut WeaponCooldown,
+        &WeaponDamage,
+        &WeaponArea,
+        &Weapon,
+    )>,
+    // Query specific weapon types for their unique properties
+    magick_circle_query: Query<&MagickCircle>,
+) {
+    // info!("Checking weapons - found {} weapons", weapon_query.iter().count());
+
+    for (weapon_entity, parent, mut cooldown, damage, area, weapon) in weapon_query.iter_mut() {
+        // info!("Processing weapon: {:?}", weapon_entity);
+
+        if let Ok((
+            player_entity,
+            cooldown_reduction,
+            damage_multiplier,
+            area_multiplier,
+            player_transform,
+        )) = player_query.get(parent.get())
+        {
+            // info!("Found player stats - CD reduction: {}, damage mult: {}, area mult: {}",
+            //     cooldown_reduction.percent,
+            //     damage_multiplier.factor,
+            //     area_multiplier.factor
+            // );
+
+            let effective_cooldown = cooldown.base_duration * (1.0 - cooldown_reduction.percent);
+            // info!("Effective cooldown: {} (base: {})", effective_cooldown, cooldown.base_duration);
+
+            cooldown
+                .timer
+                .set_duration(Duration::from_secs_f32(effective_cooldown));
+            cooldown.timer.tick(time.delta());
+
+            // info!("Timer progress: {}/{}",
+            //     cooldown.timer.elapsed_secs(),
+            //     cooldown.timer.duration().as_secs_f32()
+            // );
+
+            if cooldown.timer.just_finished() {
+                info!(
+                    "Timer finished! Current time: {}, Duration: {}",
+                    time.elapsed_secs(),
+                    cooldown.timer.duration().as_secs_f32()
+                );
+                // info!("Cooldown finished!");
+                match weapon.weapon_type {
+                    WeaponType::MagickCircle => {
+                        // info!("Attempting to spawn MagickCircle attack");
+                        if let Ok(magick_circle) = magick_circle_query.get(weapon_entity) {
+                            // info!("Spawning MagickCircle attack at position: {:?}", player_transform.translation);
+                            spawn_magick_circle_attack(
+                                &mut commands,
+                                player_entity,
+                                player_transform.translation,
+                                damage.base_amount * damage_multiplier.factor,
+                                area.base_radius * area_multiplier.factor,
+                                magick_circle.pattern_type.clone(),
+                                magick_circle.num_sigils,
+                            );
+                        } else {
+                            info!("Failed to get MagickCircle component from weapon entity");
+                        }
+                    }
+                }
+            }
+        } else {
+            info!("Failed to get player stats for weapon: {:?}", weapon_entity);
         }
     }
 }
 
-// Marker component for sigils that are part of a circle
-#[derive(Component)]
-pub struct CircleSigil {
-    pub parent_circle: Entity,
-    pub index: u32,
+/// System to manage area effects for weapons that have them
+pub fn area_effect_system(
+    time: Res<Time<Virtual>>,
+    mut effect_query: Query<(Entity, &mut AreaEffect, &WeaponDamage, &WeaponArea), With<Attack>>,
+    mut damage_events: EventWriter<DamageEvent>,
+    context_query: Query<&RapierContext>,
+    enemy_query: Query<Entity, With<Enemy>>,
+) {
+    // info!("Processing {} area effects", effect_query.iter().count());
+
+    let rapier_context = context_query.get_single()
+        .unwrap_or_else(|e| handle_rapier_context_error(e));
+
+    for (entity, mut area_effect, damage, area) in effect_query.iter_mut() {
+        if time.elapsed_secs() - area_effect.last_tick >= area_effect.tick_rate {
+            let radius = area.base_radius;
+            // info!(
+            //     "Checking collisions for effect {:?} with radius {}",
+            //     entity, radius
+            // );
+
+            let mut hits = 0;
+            for (collider1, collider2, intersecting) in
+                rapier_context.intersection_pairs_with(entity)
+            {
+                if !intersecting {
+                    continue;
+                }
+
+                let enemy_entity = if collider1 == entity {
+                    collider2
+                } else {
+                    collider1
+                };
+
+                if enemy_query.contains(enemy_entity) {
+                    hits += 1;
+                    info!(
+                        "Sending damage event: {:?} -> {:?}, amount: {}",
+                        entity, enemy_entity, damage.base_amount
+                    );
+                    damage_events.send(DamageEvent {
+                        target: enemy_entity,
+                        amount: damage.base_amount,
+                        source: Some(entity),
+                    });
+                }
+            }
+            // info!("Found {} enemies in area", hits);
+
+            area_effect.last_tick = time.elapsed_secs();
+        }
+    }
 }
 
-// Bundle for spawning a complete circle
-#[derive(Bundle)]
-pub struct CircleMagickBundle {
-    pub circle: CircleMagick,
-    pub sprite: Sprite,
-    // Add any other components needed for visualization/collision
+/// Handles lifetime of attacks and marks them for death when expired
+pub fn attack_lifetime_system(
+    mut commands: Commands,
+    time: Res<Time<Virtual>>,
+    mut query: Query<(Entity, &mut Lifetime), With<Attack>>,
+) {
+    for (entity, mut lifetime) in query.iter_mut() {
+        lifetime.timer.tick(time.delta());
+        if lifetime.timer.finished() {
+            commands.entity(entity).insert(MarkedForDeath);
+        }
+    }
 }
 
-// Components for different effects
-#[derive(Component)]
-struct PatternEffect {
-    pattern_type: PatternType,
-    completion_progress: f32,
+/// Updates rotation for rotating attacks
+pub fn attack_rotation_system(time: Res<Time<Virtual>>, mut query: Query<&mut Rotates>) {
+    for mut rotates in query.iter_mut() {
+        rotates.current_angle += rotates.speed * time.delta_secs();
+
+        // Normalize angle to prevent potential float overflow in very long sessions
+        if rotates.current_angle > std::f32::consts::TAU {
+            rotates.current_angle -= std::f32::consts::TAU;
+        }
+    }
 }
 
-#[derive(Component)]
-struct SigilEffect {
-    intent: SigilIntent,
-    drawing_progress: f32,
+/// Positions sigils around their parent attacks
+pub fn sigil_position_system(
+    mut sigil_query: Query<(&Sigil, &mut Transform, &Parent)>,
+    attack_query: Query<(&Transform, &Rotates, &WeaponArea), Without<Sigil>>,
+) {
+    for (sigil, mut sigil_transform, parent) in sigil_query.iter_mut() {
+        if let Ok((attack_transform, rotates, area)) = attack_query.get(parent.get()) {
+            let num_sigils = 4;
+            let angle = rotates.current_angle
+                + (sigil.index as f32) * std::f32::consts::TAU / num_sigils as f32;
+            let offset = Vec2::new(angle.cos(), angle.sin()) * area.base_radius;
+
+            sigil_transform.translation =
+                attack_transform.translation + Vec3::new(offset.x, offset.y, 0.1);
+        }
+    }
 }
 
-pub fn spawn_circle_magick(
+/// Spawns a magick circle weapon with default configuration
+fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
+    info!("Spawning magick circle for player: {:?}", player_entity);
+    commands.entity(player_entity).with_children(|parent| {
+        // Spawn the base weapon entity
+        parent.spawn((
+            // Core weapon components
+            Weapon {
+                weapon_type: WeaponType::MagickCircle,
+            },
+            WeaponCooldown {
+                timer: Timer::from_seconds(3.5, TimerMode::Repeating),
+                base_duration: 3.5,
+            },
+            WeaponDamage { base_amount: 10.0 },
+            WeaponArea { base_radius: 64.0 },
+            // MagickCircle specific components
+            MagickCircle {
+                pattern_type: PatternType::Banishment,
+                num_sigils: 4,
+            },
+            // Optional modifiers
+            AreaEffect {
+                duration: 0.5,
+                tick_rate: 0.5,
+                last_tick: 0.0,
+            },
+            // Could add other modifiers like PiercingAttack or Knockback
+            // based on configuration
+        ));
+    });
+}
+
+/// Helper function to spawn a magick circle attack
+pub fn spawn_magick_circle_attack(
     commands: &mut Commands,
+    parent_entity: Entity,
     position: Vec3,
+    damage: f32,
+    radius: f32,
     pattern_type: PatternType,
+    num_sigils: u32,
 ) -> Entity {
-    let circle_radius = 64.0;
-
-    let circle = commands
+    info!("Spawning attack at position: {:?}", position);
+    // First spawn the attack entity
+    let attack_entity = commands
         .spawn((
+            Attack {
+                attack_type: AttackType::MagickCircle,
+            },
+            Lifetime {
+                timer: Timer::from_seconds(3.0, TimerMode::Once),
+            },
+            Rotates {
+                speed: 1.0,
+                current_angle: 0.0,
+            },
+            WeaponDamage {
+                base_amount: damage,
+            },
+            WeaponArea {
+                base_radius: radius,
+            },
+            AreaEffect {
+                duration: 0.5,
+                tick_rate: 0.5,
+                last_tick: 0.0,
+            },
             ShapeBundle {
                 path: GeometryBuilder::new()
                     .add(&shapes::Circle {
-                        radius: circle_radius,
+                        radius,
                         center: Vec2::ZERO,
                     })
                     .build(),
@@ -117,152 +430,42 @@ pub fn spawn_circle_magick(
                 ..default()
             },
             Fill::color(Color::srgba(0.5, 0.5, 1.0, 0.3)),
-            CircleMagick {
-                pattern_type,
-                ..default()
-            },
             Sensor,
-            Collider::ball(circle_radius),
+            Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
             CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
         ))
         .id();
 
-    // Sigil size relative to circle size
-    let sigil_size = circle_radius * 0.25;
+    // Add it as a child of the parent entity
+    commands.entity(parent_entity).add_child(attack_entity);
 
-    // Spawn rotating sigils
-    for i in 0..4 {
-        let angle = (i as f32) * std::f32::consts::PI * 0.5;
-        let offset = Vec2::new(angle.cos(), angle.sin()) * circle_radius;
+    // Then spawn sigils as children of the attack
+    let sigil_size = radius * 0.25;
+    for i in 0..num_sigils {
+        let sigil_entity = commands
+            .spawn((
+                Sigil {
+                    index: i,
+                    base_size: sigil_size,
+                },
+                ShapeBundle {
+                    path: GeometryBuilder::new()
+                        .add(&shapes::Rectangle {
+                            extents: Vec2::splat(sigil_size),
+                            origin: RectangleOrigin::Center,
+                            ..default()
+                        })
+                        .build(),
+                    transform: Transform::default(),
+                    ..default()
+                },
+                Fill::color(Color::rgba(0.7, 0.7, 1.0, 0.8)),
+            ))
+            .id();
 
-        commands.spawn((
-            CircleSigil {
-                parent_circle: circle,
-                index: i,
-            },
-            ShapeBundle {
-                path: GeometryBuilder::new()
-                    .add(&shapes::Rectangle {
-                        extents: Vec2::splat(sigil_size),
-                        origin: RectangleOrigin::Center,
-                        radii: None,
-                    })
-                    .build(),
-                transform: Transform::from_translation(
-                position + Vec3::new(offset.x, offset.y, 0.1),
-                ),
-                ..default()
-            },
-            Fill::color(Color::srgba(0.7, 0.7, 1.0, 0.8)),
-        ));
+        commands.entity(attack_entity).add_child(sigil_entity);
     }
 
-    circle
-}
-
-pub fn update_circle_magick(
-    mut commands: Commands,
-    time: Res<Time<Virtual>>,
-    mut param_set: ParamSet<(
-        Query<(Entity, &mut CircleMagick, &Transform), Without<MarkedForDeath>>,
-        Query<(Entity, &CircleSigil, &mut Transform)>,
-    )>,
-    enemy_query: Query<&Enemy, (Without<MarkedForDeath>, Without<MarkedForDespawn>)>,
-    context_query: Query<&RapierContext>,
-    mut damage_events: EventWriter<DamageEvent>,
-) {
-    let current_time = time.elapsed_secs();
-
-    // First, gather circle updates and find expired circles
-    let mut circles_to_update = Vec::new();
-    let mut sigils_to_mark = Vec::new();
-
-    {
-        let mut circle_query = param_set.p0();
-        for (circle_entity, mut circle, circle_transform) in circle_query.iter_mut() {
-            // Update circle lifetime
-            circle.active_time += time.delta_secs();
-            if circle.active_time >= circle.duration {
-                // Mark the circle for death
-                commands.entity(circle_entity).insert(MarkedForDeath);
-
-                // Store circle entity to find its sigils later
-                sigils_to_mark.push(circle_entity);
-                continue;
-            }
-
-            // Apply damage effect if it's time
-            if current_time - circle.last_effect_time >= circle.effect_interval {
-                let mut enemies_in_circle = 0;
-                let Ok(rapier_context) = context_query.get_single() else {
-                    panic!("Unable to get rapier_context");
-                };
-
-                for (collider1, collider2, intersecting) in
-                    rapier_context.intersection_pairs_with(circle_entity)
-                {
-                    if !intersecting {
-                        continue;
-                    }
-
-                    let other_entity = if collider1 == circle_entity {
-                        collider2
-                    } else {
-                        collider1
-                    };
-
-                    if enemy_query.contains(other_entity) {
-                        enemies_in_circle += 1;
-                        info!("Spawning damage event for enemy: {:?}", other_entity);
-                        damage_events.send(DamageEvent {
-                            target: other_entity,
-                            amount: circle.power,
-                            source: Some(circle_entity),
-                        });
-                    }
-                }
-
-                circle.last_effect_time = current_time;
-            }
-
-            // Update rotation
-            circle.current_angle += circle.rotation_speed * time.delta_secs();
-
-            circles_to_update.push((
-                circle_entity,
-                circle.current_angle,
-                circle.radius,
-                circle_transform.translation,
-            ));
-        }
-    }
-
-    // Mark sigils of expired circles for death
-    {
-        let sigil_query = param_set.p1();
-        for circle_entity in sigils_to_mark {
-            for (sigil_entity, sigil, _) in sigil_query
-                .iter()
-                .filter(|(_, s, _)| s.parent_circle == circle_entity)
-            {
-                commands.entity(sigil_entity).insert(MarkedForDeath);
-            }
-        }
-    }
-
-    // Update sigil positions
-    {
-        let mut sigil_query = param_set.p1();
-        for (circle_entity, current_angle, radius, circle_pos) in circles_to_update {
-            for (_, sigil, mut sigil_transform) in sigil_query.iter_mut() {
-                if sigil.parent_circle == circle_entity {
-                    let angle = current_angle + (sigil.index as f32) * std::f32::consts::PI * 0.5;
-                    let offset = Vec2::new(angle.cos(), angle.sin()) * radius;
-
-                    sigil_transform.translation = circle_pos + Vec3::new(offset.x, offset.y, 0.1);
-                }
-            }
-        }
-    }
+    attack_entity
 }

@@ -3,6 +3,7 @@ use crate::components::{Enemy, Player, Projectile};
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::resources::GameState;
 use crate::GameplaySets;
+use bevy::ecs::query::QuerySingleError;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
@@ -17,9 +18,10 @@ impl Plugin for PhysicsPlugin {
         // Base physics setup
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
 
-        // Since RapierConfiguration is now a component, we'll need a startup system 
+        // Since RapierConfiguration is now a component, we'll need a startup system
         // to configure the physics world
         app.add_systems(Startup, configure_physics);
+        app.add_systems(Startup, verify_physics_config.after(configure_physics));
 
         #[cfg(debug_assertions)]
         {
@@ -40,13 +42,83 @@ impl Plugin for PhysicsPlugin {
     }
 }
 
-fn configure_physics(mut config_query: Query<&mut RapierConfiguration>) {
-    if let Ok(mut config) = config_query.get_single_mut() {
-        config.gravity = Vec2::ZERO;
-        config.physics_pipeline_active = true;
-        config.query_pipeline_active = true;
-        config.scaled_shape_subdivision = 10;
-        config.force_update_from_transform_changes = false;
+fn configure_physics(
+    mut commands: Commands,
+    rapier_query: Query<(Entity, Option<&RapierConfiguration>), With<RapierContext>>,
+) {
+    match rapier_query.get_single() {
+        Ok((entity, maybe_config)) => {
+            if maybe_config.is_none() {
+                info!(
+                    "Adding RapierConfiguration to existing RapierContext entity {:?}",
+                    entity
+                );
+                commands.entity(entity).insert(RapierConfiguration {
+                    gravity: Vec2::ZERO,
+                    physics_pipeline_active: true,
+                    query_pipeline_active: true,
+                    scaled_shape_subdivision: 10,
+                    force_update_from_transform_changes: false,
+                });
+            }
+        }
+        Err(QuerySingleError::NoEntities(_)) => {
+            error!("No RapierContext found! Physics systems may not initialize correctly.");
+        }
+        Err(QuerySingleError::MultipleEntities(_)) => {
+            error!("Multiple RapierContext components found! This may cause physics issues.");
+        }
+    }
+}
+
+fn verify_physics_config(
+    config_query: Query<(Entity, &RapierConfiguration)>,
+    context_query: Query<Entity, With<RapierContext>>,
+) {
+    // Log RapierConfiguration status
+    match config_query.get_single() {
+        Ok((entity, config)) => {
+            info!(
+                "Physics world found on entity {:?} with gravity: {:?}",
+                entity, config.gravity
+            );
+            if config.gravity != Vec2::ZERO {
+                warn!("Physics world has non-zero gravity!");
+            }
+        }
+        Err(QuerySingleError::NoEntities(_)) => {
+            error!("No RapierConfiguration found in world!");
+        }
+        Err(QuerySingleError::MultipleEntities(_)) => {
+            error!("Multiple RapierConfiguration components found!");
+        }
+    }
+
+    // Log RapierContext status
+    let context_count = context_query.iter().count();
+    match context_count {
+        0 => error!("No RapierContext found in world!"),
+        1 => {
+            let context_entity = context_query.single();
+            info!("Found single RapierContext on entity {:?}", context_entity);
+        }
+        n => {
+            error!("Found {} RapierContext components!", n);
+            for entity in context_query.iter() {
+                error!("RapierContext found on entity {:?}", entity);
+            }
+        }
+    }
+}
+
+pub(crate) fn handle_rapier_context_error(error: QuerySingleError) -> ! {
+    match error {
+        QuerySingleError::NoEntities(_) => {
+            panic!("No RapierContext found in world! This suggests the physics world was not properly initialized.");
+        }
+        QuerySingleError::MultipleEntities(count) => {
+            panic!("Found {} RapierContext components! Expected exactly one. This may be caused by multiple physics worlds being created.", count);
+        }
     }
 }
 
@@ -150,9 +222,9 @@ pub fn handle_player_enemy_collision(
 
     // Count intersecting enemies that aren't marked for death/despawn
     let mut intersecting_enemies = 0;
-    let Ok(rapier_context) = context_query.get_single() else {
-        panic!("Unable to get rapier_context");
-    };
+    let rapier_context = context_query
+        .get_single()
+        .unwrap_or_else(|e| handle_rapier_context_error(e));
 
     for (collider1, collider2, intersecting) in
         rapier_context.intersection_pairs_with(sensor_entity)

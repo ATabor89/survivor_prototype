@@ -1,6 +1,6 @@
 use crate::components::{Combat, Health, Player};
 use crate::death::MarkedForDeath;
-use crate::weapon::{spawn_circle_magick, PatternType};
+use crate::weapon::PatternType;
 use bevy::prelude::*;
 
 #[derive(Event)]
@@ -55,27 +55,6 @@ impl ProjectileStats {
             pierce_remaining: pierce,
             pierce_cooldown: 0.1,
             last_hit_time: 0.0,
-        }
-    }
-}
-
-pub fn circle_combat_system(
-    mut commands: Commands,
-    time: Res<Time<Virtual>>,
-    mut player_query: Query<(&Transform, &mut Combat), With<Player>>,
-) {
-    for (player_transform, mut combat) in player_query.iter_mut() {
-        // Check if enough time has passed since last attack based on attack speed
-        if time.elapsed_secs() - combat.last_attack >= 1.0 / combat.attack_speed {
-            // Spawn a circle at the player's position
-            spawn_circle_magick(
-                &mut commands,
-                player_transform.translation,
-                PatternType::Banishment,
-            );
-
-            // Update last attack time
-            combat.last_attack = time.elapsed_secs();
         }
     }
 }

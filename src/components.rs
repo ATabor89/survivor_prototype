@@ -55,6 +55,40 @@ impl Default for Vacuumable {
     }
 }
 
+/// Player-specific components that affect weapons
+#[derive(Component)]
+pub struct CooldownReduction {
+    pub percent: f32,  // e.g., 0.20 for 20% reduction
+}
+
+#[derive(Component)]
+pub struct DamageMultiplier {
+    pub factor: f32,  // e.g., 1.5 for 150% damage
+}
+
+#[derive(Component)]
+pub struct AreaMultiplier {
+    pub factor: f32,  // e.g., 1.2 for 120% area
+}
+
+impl Default for CooldownReduction {
+    fn default() -> Self {
+        Self { percent: 0.0 }
+    }
+}
+
+impl Default for DamageMultiplier {
+    fn default() -> Self {
+        Self { factor: 1.0 }
+    }
+}
+
+impl Default for AreaMultiplier {
+    fn default() -> Self {
+        Self { factor: 1.0 }
+    }
+}
+
 #[derive(Component)]
 pub struct PlayerStats {
     pub level: u32,

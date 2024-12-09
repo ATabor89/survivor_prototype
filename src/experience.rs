@@ -61,10 +61,10 @@ fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<E
                 ExperienceOrb { value: exp_value },
                 Vacuumable::default(),
                 Sprite {
-                        color: Color::srgb(0.5, 0.8, 1.0),
-                        custom_size: Some(Vec2::new(8.0, 8.0)),
-                        ..default()
-                    },
+                    color: Color::srgb(0.5, 0.8, 1.0),
+                    custom_size: Some(Vec2::new(8.0, 8.0)),
+                    ..default()
+                },
                 Transform::from_translation(event.position.extend(0.0)),
                 // Add Rapier components
                 RigidBody::Dynamic,
@@ -75,17 +75,23 @@ fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<E
                     Group::GROUP_4, // Experience orb group
                     Group::GROUP_1, // Player group
                 ),
+                LockedAxes::ROTATION_LOCKED,
+                Damping {
+                    linear_damping: 2.0,
+                    angular_damping: 1.0,
+                },
             ));
         }
     }
 }
 
 fn vacuum_system(
+    mut commands: Commands,
     mut params: ParamSet<(
         Query<(&Transform, &Player)>,
-        Query<(Entity, &mut Transform, &Vacuumable)>,
+        Query<(Entity, &Transform, &Vacuumable, Option<&mut Velocity>)>,
     )>,
-    time: Res<Time>,
+    time: Res<Time<Virtual>>,
 ) {
     // Collect player data first
     let player_data = {
@@ -108,7 +114,7 @@ fn vacuum_system(
     };
 
     // Then update vacuumable items
-    for (_, mut item_transform, vacuumable) in params.p1().iter_mut() {
+    for (entity, item_transform, vacuumable, velocity) in params.p1().iter() {
         let to_player = player_pos - item_transform.translation;
         let distance = to_player.length();
 
@@ -120,39 +126,38 @@ fn vacuum_system(
                 * (vacuum_influence * 2.0 + vacuum_influence.powi(3))
                 * magnet_speed;
 
-            item_transform.translation += vacuum_direction * speed * time.delta_secs();
+            // Set velocity using commands since we can't mutate it directly in a ParamSet
+            commands
+                .entity(entity)
+                .insert(Velocity::linear(vacuum_direction.truncate() * speed));
         }
     }
 }
 
 fn collect_experience_orbs(
     mut commands: Commands,
+    mut player_query: Query<(Entity, &mut Experience), With<Player>>,
+    orb_query: Query<(Entity, &ExperienceOrb), Without<MarkedForDespawn>>,
     mut collision_events: EventReader<CollisionEvent>,
-    mut player_query: Query<&mut Experience, With<Player>>,
-    orb_query: Query<(Entity, &ExperienceOrb), Without<MarkedForDespawn>>, // Don't process already marked orbs
 ) {
-    let mut processed_orbs = HashSet::new(); // Track orbs we've processed this frame
+    let Ok((player_entity, mut player_exp)) = player_query.get_single_mut() else {
+        return;
+    };
 
-    if let Ok(mut player_exp) = player_query.get_single_mut() {
-        for event in collision_events.read() {
-            if let CollisionEvent::Started(e1, e2, _) = event {
-                // Check if one entity is an experience orb
-                let (orb_entity, exp_orb) = if let Ok(query_result) = orb_query.get(*e1) {
-                    query_result
-                } else if let Ok(query_result) = orb_query.get(*e2) {
-                    query_result
-                } else {
-                    continue;
-                };
+    for event in collision_events.read() {
+        if let CollisionEvent::Started(e1, e2, _) = event {
+            let (player, orb) = if *e1 == player_entity {
+                (*e1, *e2)
+            } else if *e2 == player_entity {
+                (*e2, *e1)
+            } else {
+                continue;
+            };
 
-                // Skip if we've already processed this orb
-                if processed_orbs.contains(&orb_entity) {
-                    continue;
-                }
-
+            // If this is an experience orb
+            if let Ok((orb_entity, exp_orb)) = orb_query.get(orb) {
                 info!("Collected {} experience", exp_orb.value);
                 player_exp.current += exp_orb.value;
-                processed_orbs.insert(orb_entity);
                 commands.entity(orb_entity).insert(MarkedForDespawn);
             }
         }
