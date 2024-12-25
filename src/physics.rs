@@ -1,4 +1,4 @@
-use crate::combat::{DamageEvent, ProjectileStats};
+use crate::combat::DamageEvent;
 use crate::components::{Enemy, Player, Projectile};
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::resources::GameState;
@@ -33,7 +33,6 @@ impl Plugin for PhysicsPlugin {
             (
                 setup_physics_bodies,
                 handle_player_enemy_collision,
-                handle_projectile_collision,
             )
                 .chain()
                 .in_set(GameplaySets::Physics)
@@ -176,24 +175,10 @@ pub fn setup_physics_bodies(
             ));
         }
     }
-
-    // Projectiles setup
-    for entity in new_projectiles.iter() {
-        if commands.get_entity(entity).is_some() {
-            commands.entity(entity).insert((
-                RigidBody::Dynamic,
-                Collider::ball(8.0),
-                LockedAxes::ROTATION_LOCKED,
-                ActiveEvents::COLLISION_EVENTS,
-                CollisionGroups::new(projectile_group, enemy_group),
-            ));
-        }
-    }
 }
 
 pub fn handle_player_enemy_collision(
     context_query: Query<&RapierContext>,
-    time: Res<Time<Virtual>>,
     player_query: Query<(Entity, &Transform), With<Player>>,
     enemy_query: Query<
         Entity,
@@ -251,69 +236,5 @@ pub fn handle_player_enemy_collision(
             amount: 1.0 * intersecting_enemies as f32,
             source: None,
         });
-    }
-}
-
-pub fn handle_projectile_collision(
-    mut commands: Commands,
-    time: Res<Time<Virtual>>,
-    mut collision_events: EventReader<CollisionEvent>,
-    mut projectile_query: Query<(Entity, &mut ProjectileStats), With<Projectile>>,
-    enemy_query: Query<
-        Entity,
-        (
-            With<Enemy>,
-            Without<MarkedForDespawn>,
-            Without<MarkedForDeath>,
-        ),
-    >,
-    mut damage_events: EventWriter<DamageEvent>,
-) {
-    for event in collision_events.read() {
-        if let CollisionEvent::Started(e1, e2, _) = event {
-            // Find which entity is the projectile and which is the enemy
-            let (projectile_entity, enemy_entity, mut projectile_stats) =
-                if let Ok((proj_entity, stats)) = projectile_query.get_mut(*e1) {
-                    if enemy_query.contains(*e2) {
-                        (proj_entity, *e2, stats)
-                    } else {
-                        continue;
-                    }
-                } else if let Ok((proj_entity, stats)) = projectile_query.get_mut(*e2) {
-                    if enemy_query.contains(*e1) {
-                        (proj_entity, *e1, stats)
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                };
-
-            let current_time = time.elapsed_secs();
-
-            // Check pierce cooldown
-            if current_time - projectile_stats.last_hit_time < projectile_stats.pierce_cooldown {
-                continue;
-            }
-
-            // Send damage event
-            damage_events.send(DamageEvent {
-                target: enemy_entity,
-                amount: projectile_stats.damage,
-                source: Some(projectile_entity),
-            });
-
-            projectile_stats.last_hit_time = current_time;
-
-            // Handle piercing
-            if projectile_stats.pierce_remaining > 0 {
-                projectile_stats.pierce_remaining -= 1;
-                if projectile_stats.pierce_remaining == 0 {
-                    commands.entity(projectile_entity).insert(MarkedForDeath);
-                }
-            } else {
-                commands.entity(projectile_entity).insert(MarkedForDeath);
-            }
-        }
     }
 }

@@ -33,7 +33,7 @@ pub fn death_system(
 
     // Handle marked entities
     for (entity, transform, enemy) in marked_entities.iter() {
-        if let Some(enemy) = enemy {
+        if let Some(_enemy) = enemy {
             game_stats.enemies_killed += 1;
         }
 

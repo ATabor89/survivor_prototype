@@ -3,7 +3,6 @@ use crate::death::MarkedForDespawn;
 use crate::events::EntityDeathEvent;
 use crate::resources::GameState;
 use bevy::prelude::*;
-use bevy::utils::HashSet;
 use bevy_rapier2d::prelude::*;
 
 pub struct ExperiencePlugin;
@@ -91,7 +90,6 @@ fn vacuum_system(
         Query<(&Transform, &Player)>,
         Query<(Entity, &Transform, &Vacuumable, Option<&mut Velocity>)>,
     )>,
-    time: Res<Time<Virtual>>,
 ) {
     // Collect player data first
     let player_data = {
@@ -114,7 +112,7 @@ fn vacuum_system(
     };
 
     // Then update vacuumable items
-    for (entity, item_transform, vacuumable, velocity) in params.p1().iter() {
+    for (entity, item_transform, vacuumable, _velocity) in params.p1().iter() {
         let to_player = player_pos - item_transform.translation;
         let distance = to_player.length();
 
@@ -146,7 +144,7 @@ fn collect_experience_orbs(
 
     for event in collision_events.read() {
         if let CollisionEvent::Started(e1, e2, _) = event {
-            let (player, orb) = if *e1 == player_entity {
+            let (_player, orb) = if *e1 == player_entity {
                 (*e1, *e2)
             } else if *e2 == player_entity {
                 (*e2, *e1)

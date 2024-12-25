@@ -1,13 +1,12 @@
 use crate::combat::DamageEvent;
 use crate::components::{AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Player};
 use crate::death::MarkedForDeath;
+use crate::physics::handle_rapier_context_error;
 use crate::resources::GameState;
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::time::Duration;
-use bevy::ecs::query::QuerySingleError;
-use crate::physics::handle_rapier_context_error;
 
 /// Plugin to register all weapon-related systems
 pub struct WeaponPlugin;
@@ -19,10 +18,11 @@ impl Plugin for WeaponPlugin {
                 Update,
                 (
                     weapon_firing_system,
+                    update_weapon_positions,
                     area_effect_system,
                     attack_lifetime_system,
                     attack_rotation_system,
-                    sigil_position_system,
+                    orbital_movement_system,
                 )
                     .chain()
                     .run_if(in_state(GameState::Playing)),
@@ -56,6 +56,18 @@ impl Default for WeaponCooldown {
             base_duration: 1.0,
         }
     }
+}
+
+#[derive(Component)]
+pub enum WeaponMovement {
+    /// Weapon stays at spawn location
+    Stationary,
+    /// Weapon follows player position
+    FollowPlayer,
+    // Could add more variants like:
+    // OrbitalRotation(f32), // Rotates around player at given radius
+    // ReturnToPlayer,       // Boomerang-style
+    // LeashToPlayer(f32),   // Follows but with max distance
 }
 
 #[derive(Component)]
@@ -104,7 +116,14 @@ pub struct Sigil {
     pub base_size: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Component)]
+pub struct Orbits {
+    pub radius: f32,
+    pub speed: f32,
+    pub current_angle: f32,
+}
+
+#[derive(Component, Debug, Clone, PartialEq)]
 pub enum PatternType {
     Protection,    // Basic defensive circle
     Binding,       // Slows/holds enemies
@@ -193,7 +212,7 @@ pub fn weapon_firing_system(
         // info!("Processing weapon: {:?}", weapon_entity);
 
         if let Ok((
-            player_entity,
+            _player_entity,
             cooldown_reduction,
             damage_multiplier,
             area_multiplier,
@@ -233,7 +252,6 @@ pub fn weapon_firing_system(
                             // info!("Spawning MagickCircle attack at position: {:?}", player_transform.translation);
                             spawn_magick_circle_attack(
                                 &mut commands,
-                                player_entity,
                                 player_transform.translation,
                                 damage.base_amount * damage_multiplier.factor,
                                 area.base_radius * area_multiplier.factor,
@@ -252,6 +270,30 @@ pub fn weapon_firing_system(
     }
 }
 
+fn update_weapon_positions(
+    mut param_set: ParamSet<(
+        Query<(&mut Transform, &WeaponMovement), With<Attack>>,
+        Query<&Transform, With<Player>>,
+    )>,
+) {
+    // First get the player position
+    let player_pos = if let Ok(player_transform) = param_set.p1().get_single() {
+        player_transform.translation
+    } else {
+        return;
+    };
+
+    // Then update weapon positions
+    for (mut weapon_transform, movement) in &mut param_set.p0() {
+        match movement {
+            WeaponMovement::Stationary => (), // Do nothing
+            WeaponMovement::FollowPlayer => {
+                weapon_transform.translation = player_pos;
+            }
+        }
+    }
+}
+
 /// System to manage area effects for weapons that have them
 pub fn area_effect_system(
     time: Res<Time<Virtual>>,
@@ -262,18 +304,14 @@ pub fn area_effect_system(
 ) {
     // info!("Processing {} area effects", effect_query.iter().count());
 
-    let rapier_context = context_query.get_single()
+    let rapier_context = context_query
+        .get_single()
         .unwrap_or_else(|e| handle_rapier_context_error(e));
 
-    for (entity, mut area_effect, damage, area) in effect_query.iter_mut() {
+    for (entity, mut area_effect, damage, _area) in effect_query.iter_mut() {
         if time.elapsed_secs() - area_effect.last_tick >= area_effect.tick_rate {
-            let radius = area.base_radius;
-            // info!(
-            //     "Checking collisions for effect {:?} with radius {}",
-            //     entity, radius
-            // );
 
-            let mut hits = 0;
+            // let mut hits = 0;
             for (collider1, collider2, intersecting) in
                 rapier_context.intersection_pairs_with(entity)
             {
@@ -288,7 +326,7 @@ pub fn area_effect_system(
                 };
 
                 if enemy_query.contains(enemy_entity) {
-                    hits += 1;
+                    // hits += 1;
                     info!(
                         "Sending damage event: {:?} -> {:?}, amount: {}",
                         entity, enemy_entity, damage.base_amount
@@ -333,21 +371,26 @@ pub fn attack_rotation_system(time: Res<Time<Virtual>>, mut query: Query<&mut Ro
     }
 }
 
-/// Positions sigils around their parent attacks
-pub fn sigil_position_system(
-    mut sigil_query: Query<(&Sigil, &mut Transform, &Parent)>,
-    attack_query: Query<(&Transform, &Rotates, &WeaponArea), Without<Sigil>>,
+fn orbital_movement_system(
+    time: Res<Time<Virtual>>,
+    mut query: Query<(&mut Transform, &mut Orbits)>,
 ) {
-    for (sigil, mut sigil_transform, parent) in sigil_query.iter_mut() {
-        if let Ok((attack_transform, rotates, area)) = attack_query.get(parent.get()) {
-            let num_sigils = 4;
-            let angle = rotates.current_angle
-                + (sigil.index as f32) * std::f32::consts::TAU / num_sigils as f32;
-            let offset = Vec2::new(angle.cos(), angle.sin()) * area.base_radius;
+    for (mut transform, mut orbits) in &mut query {
+        orbits.current_angle += orbits.speed * time.delta_secs();
 
-            sigil_transform.translation =
-                attack_transform.translation + Vec3::new(offset.x, offset.y, 0.1);
+        // Normalize angle
+        if orbits.current_angle > std::f32::consts::TAU {
+            orbits.current_angle -= std::f32::consts::TAU;
         }
+
+        let offset = Vec2::new(
+            orbits.current_angle.cos() * orbits.radius,
+            orbits.current_angle.sin() * orbits.radius,
+        );
+
+        // Since we're using parent-relative transforms, this will work
+        // whether the entity is parented to the player or to a circle
+        transform.translation = Vec3::new(offset.x, offset.y, transform.translation.z);
     }
 }
 
@@ -387,7 +430,6 @@ fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
 /// Helper function to spawn a magick circle attack
 pub fn spawn_magick_circle_attack(
     commands: &mut Commands,
-    parent_entity: Entity,
     position: Vec3,
     damage: f32,
     radius: f32,
@@ -434,11 +476,10 @@ pub fn spawn_magick_circle_attack(
             Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
             CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
+            pattern_type,
+            WeaponMovement::Stationary,
         ))
         .id();
-
-    // Add it as a child of the parent entity
-    commands.entity(parent_entity).add_child(attack_entity);
 
     // Then spawn sigils as children of the attack
     let sigil_size = radius * 0.25;
@@ -448,6 +489,11 @@ pub fn spawn_magick_circle_attack(
                 Sigil {
                     index: i,
                     base_size: sigil_size,
+                },
+                Orbits {
+                    radius,
+                    speed: 1.0,
+                    current_angle: (i as f32) * std::f32::consts::TAU / num_sigils as f32,
                 },
                 ShapeBundle {
                     path: GeometryBuilder::new()
@@ -460,7 +506,7 @@ pub fn spawn_magick_circle_attack(
                     transform: Transform::default(),
                     ..default()
                 },
-                Fill::color(Color::rgba(0.7, 0.7, 1.0, 0.8)),
+                Fill::color(Color::srgba(0.7, 0.7, 1.0, 0.8)),
             ))
             .id();
 

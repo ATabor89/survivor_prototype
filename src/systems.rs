@@ -134,14 +134,6 @@ pub fn handle_pause_state(
     }
 }
 
-// Optional: Define input system sets for organization
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-enum InputSet {
-    Universal,
-    Menu,
-    Gameplay,
-}
-
 pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
     commands.spawn((
         Player {

@@ -1,6 +1,5 @@
-use crate::components::{Combat, Health, Player};
+use crate::components::Health;
 use crate::death::MarkedForDeath;
-use crate::weapon::PatternType;
 use bevy::prelude::*;
 
 #[derive(Event)]
@@ -36,25 +35,6 @@ impl Default for LastDamageTime {
         Self {
             time: 0.0,
             cooldown: 0.25, // Default to 0.25s between damage
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct ProjectileStats {
-    pub damage: f32,
-    pub pierce_remaining: u32,
-    pub pierce_cooldown: f32,
-    pub last_hit_time: f32,
-}
-
-impl ProjectileStats {
-    pub fn new(damage: f32, pierce: u32) -> Self {
-        Self {
-            damage,
-            pierce_remaining: pierce,
-            pierce_cooldown: 0.1,
-            last_hit_time: 0.0,
         }
     }
 }
