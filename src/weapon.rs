@@ -7,26 +7,29 @@ use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::time::Duration;
+use crate::systems::spawn_player;
 
 /// Plugin to register all weapon-related systems
 pub struct WeaponPlugin;
 
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Playing), setup_player_weapons)
+        app.add_event::<AddWeaponEvent>()
             .add_systems(
-                Update,
-                (
-                    weapon_firing_system,
-                    update_weapon_positions,
-                    area_effect_system,
-                    attack_lifetime_system,
-                    attack_rotation_system,
-                    orbital_movement_system,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::Playing)),
-            );
+            Update,
+            (
+                setup_player_inventory,
+                handle_new_weapons,
+                weapon_firing_system,
+                update_weapon_positions,
+                area_effect_system,
+                attack_lifetime_system,
+                attack_rotation_system,
+                orbital_movement_system,
+            )
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+        );
     }
 }
 
@@ -36,7 +39,65 @@ pub struct Weapon {
     pub weapon_type: WeaponType,
 }
 
-#[derive(Component, Clone)]
+#[derive(Clone)]
+pub struct WeaponConfig {
+    weapon_type: WeaponType,
+    level: u32,
+    // Could add other configuration here like variants/modifiers
+}
+
+// Component to define what weapon a player starts with
+#[derive(Component)]
+pub struct StartingWeapon(pub WeaponType);
+
+// Event for when a new weapon should be added
+#[derive(Event)]
+pub struct AddWeaponEvent {
+    pub player: Entity,
+    pub weapon_type: WeaponType,
+}
+
+#[derive(Component)]
+pub struct WeaponInventory {
+    weapons: Vec<WeaponConfig>,
+}
+
+// This runs once on player spawn and handles the starting weapon
+pub fn setup_player_inventory(
+    mut commands: Commands,
+    query: Query<(Entity, &StartingWeapon), (Added<Player>, Without<WeaponInventory>)>,
+) {
+    for (player_entity, starting_weapon) in query.iter() {
+        let inventory = WeaponInventory {
+            weapons: vec![WeaponConfig {
+                weapon_type: starting_weapon.0,
+                level: 1,
+            }],
+        };
+
+        commands.entity(player_entity).insert(inventory);
+        spawn_weapon(&mut commands, player_entity, starting_weapon.0);
+    }
+}
+
+// This system only runs when new weapons are added
+pub fn handle_new_weapons(
+    mut commands: Commands,
+    mut events: EventReader<AddWeaponEvent>,
+    mut inventories: Query<&mut WeaponInventory>,
+) {
+    for event in events.read() {
+        if let Ok(mut inventory) = inventories.get_mut(event.player) {
+            inventory.weapons.push(WeaponConfig {
+                weapon_type: event.weapon_type,
+                level: 1,
+            });
+            spawn_weapon(&mut commands, event.player, event.weapon_type);
+        }
+    }
+}
+
+#[derive(Component, Copy, Clone)]
 pub enum WeaponType {
     MagickCircle,
     // Future weapon types...
@@ -101,6 +162,52 @@ pub struct Lifetime {
 pub struct Rotates {
     pub speed: f32,
     pub current_angle: f32,
+}
+
+#[derive(Clone)]
+pub enum WeaponUpgrade {
+    Damage(f32),
+    Area(f32),
+    Cooldown(f32),
+    Count(u32),
+    Special(SpecialUpgrade),
+}
+
+#[derive(Clone)]
+pub enum SpecialUpgrade {
+    MagickCircleBinding,
+    MagickCircleBanishment,
+    // etc
+}
+
+pub struct WeaponProgression {
+    upgrades: Vec<WeaponUpgrade>,
+    max_level: u32,
+    limit_break_options: Vec<WeaponUpgrade>,
+    limit_break_weights: Vec<f32>,
+}
+
+impl WeaponType {
+    pub fn get_progression(&self) -> WeaponProgression {
+        match self {
+            WeaponType::MagickCircle => WeaponProgression {
+                upgrades: vec![
+                    WeaponUpgrade::Damage(1.2),  // Level 2
+                    WeaponUpgrade::Count(1),     // Level 3
+                    WeaponUpgrade::Area(1.3),    // Level 4
+                    WeaponUpgrade::Special(SpecialUpgrade::MagickCircleBinding), // Level 5
+                ],
+                max_level: 5,
+                limit_break_options: vec![
+                    WeaponUpgrade::Damage(1.1),
+                    WeaponUpgrade::Area(1.1),
+                    WeaponUpgrade::Cooldown(0.9),
+                ],
+                limit_break_weights: vec![0.4, 0.3, 0.3],
+            },
+            // Add other weapon types here
+        }
+    }
 }
 
 /// Specialized MagickCircle components
@@ -310,7 +417,6 @@ pub fn area_effect_system(
 
     for (entity, mut area_effect, damage, _area) in effect_query.iter_mut() {
         if time.elapsed_secs() - area_effect.last_tick >= area_effect.tick_rate {
-
             // let mut hits = 0;
             for (collider1, collider2, intersecting) in
                 rapier_context.intersection_pairs_with(entity)
@@ -349,12 +455,15 @@ pub fn area_effect_system(
 pub fn attack_lifetime_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
-    mut query: Query<(Entity, &mut Lifetime), With<Attack>>,
+    mut query: Query<(Entity, &mut Lifetime), (With<Attack>, Without<MarkedForDeath>)>,
 ) {
     for (entity, mut lifetime) in query.iter_mut() {
         lifetime.timer.tick(time.delta());
         if lifetime.timer.finished() {
-            commands.entity(entity).insert(MarkedForDeath);
+            // First check if the entity still exists
+            if commands.get_entity(entity).is_some() {
+                commands.entity(entity).insert(MarkedForDeath);
+            }
         }
     }
 }

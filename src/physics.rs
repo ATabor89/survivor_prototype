@@ -30,10 +30,7 @@ impl Plugin for PhysicsPlugin {
 
         app.add_systems(
             Update,
-            (
-                setup_physics_bodies,
-                handle_player_enemy_collision,
-            )
+            (setup_physics_bodies, handle_player_enemy_collision)
                 .chain()
                 .in_set(GameplaySets::Physics)
                 .run_if(in_state(GameState::Playing)),

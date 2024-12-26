@@ -24,11 +24,11 @@ use crate::systems::{
     spawn_enemies, spawn_player, universal_input_system,
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
+use crate::weapon::WeaponPlugin;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::ShapePlugin;
 use upgrade::UpgradePool;
-use crate::weapon::WeaponPlugin;
 
 // First, let's organize our systems into sets for better control
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]

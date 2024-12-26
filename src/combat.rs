@@ -47,7 +47,10 @@ pub fn handle_damage(
     mut cooldown_query: Query<&mut DamageCooldown>,
 ) {
     for event in damage_events.read() {
-        info!("Processing damage event for {:?}, amount: {}", event.target, event.amount);
+        info!(
+            "Processing damage event for {:?}, amount: {}",
+            event.target, event.amount
+        );
 
         let current_time = time.elapsed_secs();
 
@@ -55,9 +58,13 @@ pub fn handle_damage(
         let should_damage = if let Ok(mut cooldown) = cooldown_query.get_mut(event.target) {
             let can_damage = current_time - cooldown.time >= cooldown.cooldown;
             if !can_damage {
-                info!("Cooldown active. Current: {}, Last: {}, Diff: {}, Need: {}",
-                    current_time, cooldown.time,
-                    current_time - cooldown.time, cooldown.cooldown);
+                info!(
+                    "Cooldown active. Current: {}, Last: {}, Diff: {}, Need: {}",
+                    current_time,
+                    cooldown.time,
+                    current_time - cooldown.time,
+                    cooldown.cooldown
+                );
             } else {
                 cooldown.time = current_time;
                 info!("Updated cooldown time to: {}", current_time);
@@ -76,11 +83,16 @@ pub fn handle_damage(
         if let Ok(mut health) = health_query.get_mut(event.target) {
             let old_health = health.current;
             health.current -= event.amount;
-            info!("Health changed from {} to {} for {:?}",
-                  old_health, health.current, event.target);
+            info!(
+                "Health changed from {} to {} for {:?}",
+                old_health, health.current, event.target
+            );
 
             if health.current <= 0.0 {
-                info!("Marking {:?} for death at health {}", event.target, health.current);
+                info!(
+                    "Marking {:?} for death at health {}",
+                    event.target, health.current
+                );
                 commands.entity(event.target).insert(MarkedForDeath);
             }
         } else {

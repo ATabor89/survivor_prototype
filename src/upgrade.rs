@@ -210,26 +210,24 @@ pub fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is
 
     parent
         .spawn((
-            Button {
+            Button { ..default() },
+            BorderColor(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
+            BackgroundColor(if is_first {
+                Color::srgb(0.3, 0.3, 0.4)
+            } else {
+                Color::srgb(0.2, 0.2, 0.2)
+            }),
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(100.0), // Made taller
+                padding: UiRect::all(Val::Px(16.0)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                border: UiRect::all(Val::Px(2.0)),
+                margin: UiRect::vertical(Val::Px(4.0)),
                 ..default()
             },
-            BorderColor(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
-    BackgroundColor(if is_first {
-        Color::srgb(0.3, 0.3, 0.4)
-    } else {
-        Color::srgb(0.2, 0.2, 0.2)
-    }),
-            Node {
-                   width: Val::Percent(100.0),
-                   min_height: Val::Px(100.0), // Made taller
-                   padding: UiRect::all(Val::Px(16.0)),
-                   flex_direction: FlexDirection::Row,
-                   align_items: AlignItems::Center,
-                   column_gap: Val::Px(16.0),
-                   border: UiRect::all(Val::Px(2.0)),
-                   margin: UiRect::vertical(Val::Px(4.0)),
-                   ..default()
-               },
             MenuItem { selected: is_first },
             MenuActionComponent {
                 action: MenuAction::SelectUpgrade(choice.clone()),
@@ -237,41 +235,42 @@ pub fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is
         ))
         .with_children(|parent| {
             // Icon placeholder
-            parent.spawn((Text::new(
-                icon,
-            ), TextFont {
-                font_size: 32.0, // Made larger
-                ..default()
-            },
-                          TextColor(menu::get_rarity_color(&choice.rarity))));
+            parent.spawn((
+                Text::new(icon),
+                TextFont {
+                    font_size: 32.0, // Made larger
+                    ..default()
+                },
+                TextColor(menu::get_rarity_color(&choice.rarity)),
+            ));
 
             // Text container
             parent
                 .spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
                     ..default()
                 })
                 .with_children(|parent| {
                     // Upgrade name
-                    parent.spawn((Text::new(
-                        name,
-                    ), TextFont {
-                        font_size: 24.0, // Made larger
-                        ..default()
-                    },
-                                  TextColor(
-                                      menu::get_rarity_color(&choice.rarity)
-                                  )));
+                    parent.spawn((
+                        Text::new(name),
+                        TextFont {
+                            font_size: 24.0, // Made larger
+                            ..default()
+                        },
+                        TextColor(menu::get_rarity_color(&choice.rarity)),
+                    ));
 
                     // Description
-                    parent.spawn((Text::new(
-                        description,
-                    ), TextFont {
-                        font_size: 18.0, // Made larger
-                        ..default()
-                    },
-                                  TextColor(Color::srgb(0.8, 0.8, 0.8)),));
+                    parent.spawn((
+                        Text::new(description),
+                        TextFont {
+                            font_size: 18.0, // Made larger
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
                 });
         });
 }

@@ -296,7 +296,8 @@ pub fn update_menu_buttons(
         // Update text color
         if let Some(&child) = children.first() {
             if let Ok((_, mut text_color)) = text_query.get_mut(child) {
-                text_color.0 = if menu_item.selected || matches!(interaction, Interaction::Hovered) {
+                text_color.0 = if menu_item.selected || matches!(interaction, Interaction::Hovered)
+                {
                     Color::srgb(1.0, 0.84, 0.0)
                 } else {
                     Color::WHITE

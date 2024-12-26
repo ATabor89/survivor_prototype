@@ -58,17 +58,17 @@ impl Default for Vacuumable {
 /// Player-specific components that affect weapons
 #[derive(Component)]
 pub struct CooldownReduction {
-    pub percent: f32,  // e.g., 0.20 for 20% reduction
+    pub percent: f32, // e.g., 0.20 for 20% reduction
 }
 
 #[derive(Component)]
 pub struct DamageMultiplier {
-    pub factor: f32,  // e.g., 1.5 for 150% damage
+    pub factor: f32, // e.g., 1.5 for 150% damage
 }
 
 #[derive(Component)]
 pub struct AreaMultiplier {
-    pub factor: f32,  // e.g., 1.2 for 120% area
+    pub factor: f32, // e.g., 1.2 for 120% area
 }
 
 impl Default for CooldownReduction {
