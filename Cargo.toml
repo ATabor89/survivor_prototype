@@ -9,6 +9,9 @@ bevy = "0.15.0"
 bevy_rapier2d = { git = "https://github.com/Vrixyz/bevy_rapier", branch = "master-bevy_0.15", features = ["debug-render-2d"] }
 bevy_prototype_lyon = "0.13.0"
 rand = "0.8.5"
+strum = "0.26.3"
+strum_macros = "0.26.4"
+bevy-panic-handler = "3.0.0"
 fastrand = "2.1.1"
 
 # Enable a small amount of optimization in the dev profile.

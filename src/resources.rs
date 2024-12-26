@@ -12,11 +12,21 @@ pub enum GameState {
     Quit,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct GameStats {
     pub enemies_killed: u32,
     pub time_elapsed: f32,
     pub victory_threshold: u32,
+}
+
+impl Default for GameStats {
+    fn default() -> Self {
+        Self {
+            enemies_killed: 0,
+            time_elapsed: 0.0,
+            victory_threshold: 200,
+        }
+    }
 }
 
 #[derive(Resource)]

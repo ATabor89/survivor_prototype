@@ -9,15 +9,6 @@ pub enum Rarity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum WeaponType {
-    Sword,
-    Axe,
-    Spear,
-    Bow,
-    Magic,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EquipmentType {
     Armor,
     Ring,
@@ -33,19 +24,6 @@ pub enum StatType {
     Attack,
     Defense,
     Luck,
-}
-
-// Display implementations for our enum types
-impl std::fmt::Display for WeaponType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WeaponType::Sword => write!(f, "Sword"),
-            WeaponType::Axe => write!(f, "Axe"),
-            WeaponType::Spear => write!(f, "Spear"),
-            WeaponType::Bow => write!(f, "Bow"),
-            WeaponType::Magic => write!(f, "Magic"),
-        }
-    }
 }
 
 impl std::fmt::Display for EquipmentType {

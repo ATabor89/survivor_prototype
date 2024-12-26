@@ -1,8 +1,9 @@
 use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
-use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
+use crate::types::{EquipmentType, Rarity, StatType};
 use crate::upgrade;
 use crate::upgrade::UpgradePool;
+use crate::weapon::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::prelude::*;
 
 // Base menu components
@@ -38,7 +39,7 @@ pub enum MenuAction {
 }
 
 // Level-up specific components
-#[derive(Component, Clone)]
+#[derive(Debug, Component, Clone)]
 pub struct UpgradeChoice {
     pub upgrade_type: UpgradeType,
     pub description: String,
@@ -47,7 +48,7 @@ pub struct UpgradeChoice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpgradeType {
-    Weapon(WeaponType),
+    Weapon(WeaponType, WeaponUpgrade),
     Equipment(EquipmentType),
     Stat(StatType),
 }
@@ -72,9 +73,13 @@ pub fn spawn_level_up_menu(
     if !existing_menu.is_empty() {
         return;
     }
+    
+    info!("Generating choices for level up menu");
 
     // Generate 3 random upgrade choices
     let choices = upgrade_pool.generate_choices(3);
+    
+    info!("Choices: {:?}", choices);
 
     commands
         .spawn((

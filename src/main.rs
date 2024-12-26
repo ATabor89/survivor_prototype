@@ -159,7 +159,7 @@ fn main() {
                     ..Default::default()
                 }),
         )
-        // .add_plugins(DefaultPlugins)
+        // .add_plugins(bevy_panic_handler::PanicHandler::new().build())
         .add_plugins(ShapePlugin)
         .add_plugins(SurvivorsGamePlugin)
         .run();

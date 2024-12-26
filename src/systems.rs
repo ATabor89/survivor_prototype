@@ -5,7 +5,7 @@ use crate::components::{
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
-use crate::weapon::{StartingWeapon, WeaponType};
+use crate::weapon::{BindingEffect, StartingWeapon, WeaponType};
 
 // Startup system to load textures and create atlas layouts
 pub fn load_textures(
@@ -230,16 +230,25 @@ pub fn spawn_enemies(
     }
 }
 
-// Update enemy movement using Rapier's velocity system
 pub fn enemy_movement(
     player_query: Query<&Transform, With<Player>>,
-    mut enemy_query: Query<(&Transform, &Enemy, &mut Velocity)>,
+    mut enemy_query: Query<(Entity, &Transform, &Enemy, &mut Velocity)>,
+    binding_query: Query<&BindingEffect>,
 ) {
     if let Ok(player_transform) = player_query.get_single() {
-        for (transform, enemy, mut velocity) in enemy_query.iter_mut() {
+        for (entity, transform, enemy, mut velocity) in enemy_query.iter_mut() {
             let direction = (player_transform.translation - transform.translation).normalize();
-            // Reduce speed slightly to make collisions more stable
-            velocity.linvel = direction.truncate() * enemy.speed * 0.8;
+            let base_velocity = direction.truncate() * enemy.speed * 0.8;
+
+            // Check if enemy is under binding effect
+            let binding_strength = if let Ok(binding) = binding_query.get(entity) {
+                binding.strength
+            } else {
+                0.0
+            };
+
+            // Apply movement reduction based on binding strength
+            velocity.linvel = base_velocity * (1.0 - binding_strength);
         }
     }
 }

@@ -3,12 +3,14 @@ use crate::menu;
 use crate::menu::{
     MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent, UpgradeType,
 };
-use crate::types::{EquipmentType, Rarity, StatType, WeaponType};
+use crate::types::{EquipmentType, Rarity, StatType};
+use crate::weapon::{WeaponConfig, WeaponInventory, WeaponType, MAX_WEAPON_LEVEL};
 use bevy::color::{Alpha, Color};
 use bevy::hierarchy::{BuildChildren, ChildBuilder};
 use bevy::log::info;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
+use strum::IntoEnumIterator;
 
 #[derive(Resource)]
 pub struct UpgradePool {
@@ -26,13 +28,7 @@ impl Default for UpgradePool {
 impl UpgradePool {
     pub fn new() -> Self {
         Self {
-            weapons: vec![
-                (WeaponType::Sword, Rarity::Common),
-                (WeaponType::Axe, Rarity::Common),
-                (WeaponType::Spear, Rarity::Uncommon),
-                (WeaponType::Bow, Rarity::Uncommon),
-                (WeaponType::Magic, Rarity::Rare),
-            ],
+            weapons: vec![(WeaponType::MagickCircle, Rarity::Common)],
             equipment: vec![
                 (EquipmentType::Armor, Rarity::Common),
                 (EquipmentType::Ring, Rarity::Uncommon),
@@ -50,57 +46,59 @@ impl UpgradePool {
         }
     }
 
+    pub fn generate_weapon_upgrades(inventory: &WeaponInventory) -> Vec<UpgradeChoice> {
+        let mut upgrades = Vec::new();
+
+        for weapon_config in &inventory.weapons {
+            info!(
+                "Processing weapon config from inventory: {:?}",
+                weapon_config
+            );
+
+            // If weapon isn't max level, get next upgrade
+            if weapon_config.level < MAX_WEAPON_LEVEL as u32 {
+                info!("Weapon is below max level");
+                let progression = weapon_config.weapon_type.get_progression();
+                if let Some(next_upgrade) = progression.get(weapon_config.level as usize - 1) {
+                    info!("Next upgrade found: {:?}", next_upgrade);
+                    upgrades.push(UpgradeChoice {
+                        upgrade_type: UpgradeType::Weapon(weapon_config.weapon_type, next_upgrade.clone()),
+                        description: format!(
+                            "{} Level {}, Add a second circle of banishment",
+                            weapon_config.weapon_type,
+                            weapon_config.level + 1,
+                        ),
+                        rarity: Rarity::Common, // We can make this more sophisticated later
+                    });
+                }
+            }
+        }
+        
+        info!("Generated weapon upgrades: {:?}", upgrades);
+
+        upgrades
+    }
+
     pub fn generate_choices(&self, count: usize) -> Vec<UpgradeChoice> {
-        use crate::menu::UpgradeType;
-        use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        // First get actual weapon upgrades
         let mut choices = Vec::new();
 
-        while choices.len() < count {
-            let choice = match rand::random::<f32>() {
-                x if x < 0.4 => {
-                    // Weapon choice
-                    if let Some((ref weapon_type, ref rarity)) = self.weapons.choose(&mut rng) {
-                        UpgradeChoice {
-                            upgrade_type: UpgradeType::Weapon(weapon_type.clone()),
-                            description: format!("Add a {} to your arsenal", weapon_type),
-                            rarity: rarity.clone(),
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-                x if x < 0.7 => {
-                    // Equipment choice
-                    if let Some((ref equipment_type, ref rarity)) = self.equipment.choose(&mut rng)
-                    {
-                        UpgradeChoice {
-                            upgrade_type: UpgradeType::Equipment(equipment_type.clone()),
-                            description: format!(
-                                "Equip {} for enhanced protection",
-                                equipment_type
-                            ),
-                            rarity: rarity.clone(),
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-                _ => {
-                    // Stat choice
-                    if let Some((ref stat_type, ref rarity)) = self.stats.choose(&mut rng) {
-                        UpgradeChoice {
-                            upgrade_type: UpgradeType::Stat(stat_type.clone()),
-                            description: format!("Increase your {} by 10%", stat_type),
-                            rarity: rarity.clone(),
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-            };
-            choices.push(choice);
-        }
+        // For now, hardcode player's weapon inventory since we haven't hooked that up yet
+        let inventory = WeaponInventory {
+            weapons: vec![WeaponConfig {
+                weapon_type: WeaponType::MagickCircle,
+                level: 1,
+            }],
+        };
+
+        let weapon_upgrades = Self::generate_weapon_upgrades(&inventory);
+        choices.extend(weapon_upgrades);
+
+        // If we need more choices, we can fill with other types of upgrades
+        // (equipment, stats, etc.)
+        // while choices.len() < count {
+        //     // Add placeholder upgrades or leave empty depending on preference
+        // }
 
         choices
     }
@@ -135,15 +133,13 @@ impl UpgradeTracker {
         }
 
         // Initialize all weapons as not owned
-        for weapon_type in [
-            WeaponType::Sword,
-            WeaponType::Axe,
-            WeaponType::Spear,
-            WeaponType::Bow,
-            WeaponType::Magic,
-        ] {
+        for weapon_type in WeaponType::iter() {
             weapons.insert(weapon_type, None);
         }
+
+        weapons
+            .entry(WeaponType::MagickCircle)
+            .and_modify(|e| *e = Some(1));
 
         // Initialize all equipment as not owned
         for equipment_type in [
@@ -277,13 +273,10 @@ pub fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is
 
 fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, String) {
     match &choice.upgrade_type {
-        UpgradeType::Weapon(weapon_type) => {
+        UpgradeType::Weapon(weapon_type, ..) => {
             let icon = match weapon_type {
-                WeaponType::Sword => "⚔️",
-                WeaponType::Axe => "🪓",
-                WeaponType::Spear => "🔱",
-                WeaponType::Bow => "🏹",
-                WeaponType::Magic => "🔮",
+                WeaponType::MagickCircle => "🔮",
+                // We can add more weapon types here as we implement them
             };
             (
                 icon,
@@ -337,7 +330,7 @@ pub fn apply_confirmed_upgrade(
                     StatType::Defense => stats.defense *= 1.1,
                     StatType::Luck => stats.luck *= 1.1,
                 },
-                UpgradeType::Weapon(weapon_type) => {
+                UpgradeType::Weapon(weapon_type, weapon_upgrade) => {
                     info!("Adding weapon: {:?}", weapon_type);
                     // TODO: Implement weapon system
                 }
