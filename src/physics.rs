@@ -1,5 +1,5 @@
 use crate::combat::DamageEvent;
-use crate::components::{Enemy, Player, Projectile};
+use crate::components::{Enemy, Player};
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::resources::GameState;
 use crate::GameplaySets;
@@ -122,7 +122,6 @@ pub fn setup_physics_bodies(
     mut commands: Commands,
     new_players: Query<Entity, (Added<Player>, Without<RigidBody>)>,
     new_enemies: Query<Entity, (Added<Enemy>, Without<RigidBody>)>,
-    new_projectiles: Query<Entity, (Added<Projectile>, Without<RigidBody>)>,
 ) {
     let player_group = Group::GROUP_1;
     let enemy_group = Group::GROUP_2;

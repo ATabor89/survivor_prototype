@@ -1,10 +1,10 @@
-use crate::components::{Health, Luck, Player, PlayerStats};
+use crate::components::{Health, Luck, Player};
 use crate::menu;
 use crate::menu::{
     MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent,
 };
 use crate::types::{EquipmentType, Rarity, StatType};
-use crate::weapon::{WeaponConfig, WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
+use crate::weapon::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::color::{Alpha, Color};
 use bevy::hierarchy::{BuildChildren, ChildBuilder};
 use bevy::log::info;
@@ -446,38 +446,6 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
                 format!("{} Up", stat_type),
                 choice.description.clone(),
             )
-        }
-    }
-}
-
-// System to apply confirmed upgrades
-pub fn apply_confirmed_upgrade(
-    mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
-    mut player_stats: Query<&mut PlayerStats>,
-) {
-    for event in upgrade_events.read() {
-        if let Ok(mut stats) = player_stats.get_single_mut() {
-            match &event.upgrade.upgrade_type {
-                UpgradeType::Stat(stat_type) => match stat_type {
-                    StatType::Health => stats.health *= 1.1,
-                    StatType::Speed => stats.speed *= 1.1,
-                    StatType::Attack => stats.attack *= 1.1,
-                    StatType::Defense => stats.defense *= 1.1,
-                    StatType::Luck => stats.luck *= 1.1,
-                },
-                UpgradeType::Weapon(weapon_type, weapon_upgrade) => {
-                    info!("Adding weapon: {:?}", weapon_type);
-                    // TODO: Implement weapon system
-                }
-                UpgradeType::Equipment(equipment_type) => {
-                    info!("Adding equipment: {:?}", equipment_type);
-                    // TODO: Implement equipment system
-                }
-                UpgradeType::Generic(generic_upgrade_type) => match generic_upgrade_type {
-                    GenericUpgrade::HealthPickup(_) => {}
-                    GenericUpgrade::ResourcePickup(_) => {}
-                },
-            }
         }
     }
 }

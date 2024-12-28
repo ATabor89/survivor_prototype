@@ -1,12 +1,13 @@
 use crate::combat::DamageCooldown;
 use crate::components::{
-    AreaMultiplier, Combat, CooldownReduction, DamageMultiplier, Enemy, Experience, Health, Luck,
+    AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Health, Luck,
     Player,
 };
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
 use crate::weapon::{BindingEffect, StartingWeapon, WeaponType};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use crate::experience::Experience;
 
 // Startup system to load textures and create atlas layouts
 pub fn load_textures(
@@ -159,11 +160,6 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 0.0),
-        Combat {
-            attack_damage: 10.0,
-            attack_speed: 0.60,
-            last_attack: 0.0,
-        },
         Experience {
             current: 0,
             level: 1,

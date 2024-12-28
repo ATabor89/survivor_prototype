@@ -23,6 +23,30 @@ impl Plugin for ExperiencePlugin {
     }
 }
 
+#[derive(Component)]
+pub struct Experience {
+    pub current: u32,
+    pub level: u32,
+}
+
+#[derive(Component)]
+pub struct ExperienceOrb {
+    pub value: u32,
+}
+
+#[derive(Component)]
+pub struct Vacuumable {
+    pub base_speed: f32,
+}
+
+impl Default for Vacuumable {
+    fn default() -> Self {
+        Self {
+            base_speed: 300.0, // Some reasonable default speed
+        }
+    }
+}
+
 // Could move this to a config resource if we want to make it data-driven
 fn calculate_experience_needed(level: u32) -> u32 {
     // Simple exponential scaling: each level needs 25% more XP than the last

@@ -1,11 +1,11 @@
 use crate::components::{Luck, Player};
 use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
-use crate::types::{EquipmentType, Rarity, StatType};
+use crate::types::{Rarity, StatType};
 use crate::upgrade;
 use crate::upgrade::{UpgradePool, UpgradeType};
-use crate::weapon::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::prelude::*;
+use crate::weapon::WeaponInventory;
 
 // Base menu components
 #[derive(Component)]

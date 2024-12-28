@@ -11,7 +11,6 @@ use bevy_prototype_lyon::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::fmt::Formatter;
 use std::time::Duration;
-use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 pub static MAX_WEAPON_LEVEL: u8 = 8;
@@ -144,7 +143,6 @@ pub fn handle_new_weapons(
 }
 
 pub fn handle_weapon_upgrade(
-    mut commands: Commands,
     mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
     mut weapon_query: Query<(
         &Parent,
@@ -334,20 +332,6 @@ impl std::fmt::Display for WeaponUpgrade {
             }
         }
     }
-}
-
-#[derive(Clone)]
-pub enum SpecialUpgrade {
-    MagickCircleBinding,
-    MagickCircleBanishment,
-    // etc
-}
-
-pub struct WeaponProgression {
-    upgrades: Vec<WeaponUpgrade>,
-    max_level: u32,
-    limit_break_options: Vec<WeaponUpgrade>,
-    limit_break_weights: Vec<f32>,
 }
 
 impl WeaponType {
@@ -581,15 +565,6 @@ impl std::fmt::Display for PatternType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SigilIntent {
-    Protect,
-    Attack,
-    Control,
-    Transform,
-    Reveal,
-}
-
 /// Optional weapon modifiers
 #[derive(Component)]
 pub struct PiercingAttack {
@@ -606,18 +581,6 @@ pub struct AreaEffect {
 #[derive(Component)]
 pub struct Knockback {
     pub force: f32,
-}
-
-/// System to give newly spawned players their starting weapon
-pub fn setup_player_weapons(
-    mut commands: Commands,
-    query: Query<Entity, (With<Player>, Added<Player>)>,
-) {
-    info!("Setup player weapons system running");
-    for player_entity in query.iter() {
-        info!("Setting up weapons for player: {:?}", player_entity);
-        spawn_weapon(&mut commands, player_entity, WeaponType::MagickCircle);
-    }
 }
 
 /// Spawns a weapon for the player based on weapon type
