@@ -19,7 +19,7 @@ pub fn death_system(
 ) {
     // Check player death first
     if let Ok((entity, health)) = player_query.get_single() {
-        if health.current <= 0.0 {
+        if health.current <= 0 {
             commands.entity(entity).insert(MarkedForDespawn);
             death_events.send(EntityDeathEvent {
                 entity,
@@ -41,7 +41,7 @@ pub fn death_system(
         death_events.send(EntityDeathEvent {
             entity,
             position: transform.map_or(Vec2::ZERO, |t| t.translation.truncate()),
-            exp_value: enemy.map(|e| e.experience_value),
+            exp_value: enemy.map(|e| e.experience_value * 66),
         });
 
         // Mark for despawn after death processing

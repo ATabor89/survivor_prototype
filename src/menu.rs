@@ -1,8 +1,9 @@
+use crate::components::{Luck, Player};
 use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
 use crate::types::{EquipmentType, Rarity, StatType};
 use crate::upgrade;
-use crate::upgrade::UpgradePool;
+use crate::upgrade::{UpgradePool, UpgradeType};
 use crate::weapon::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::prelude::*;
 
@@ -46,13 +47,6 @@ pub struct UpgradeChoice {
     pub rarity: Rarity,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum UpgradeType {
-    Weapon(WeaponType, WeaponUpgrade),
-    Equipment(EquipmentType),
-    Stat(StatType),
-}
-
 #[derive(Event)]
 pub struct UpgradeConfirmedEvent {
     pub upgrade: UpgradeChoice,
@@ -69,16 +63,21 @@ pub fn spawn_level_up_menu(
     mut commands: Commands,
     upgrade_pool: Res<UpgradePool>,
     existing_menu: Query<Entity, With<MenuRoot>>,
+    inventory_query: Query<(&Player, &WeaponInventory, &Luck)>,
 ) {
     if !existing_menu.is_empty() {
         return;
     }
-    
+
+    let Ok((_player, inventory, luck)) = inventory_query.get_single() else {
+        panic!("Unable to get weapon inventory or luck");
+    };
+
     info!("Generating choices for level up menu");
 
     // Generate 3 random upgrade choices
-    let choices = upgrade_pool.generate_choices(3);
-    
+    let choices = upgrade_pool.generate_choices(luck, inventory);
+
     info!("Choices: {:?}", choices);
 
     commands

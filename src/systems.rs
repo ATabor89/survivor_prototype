@@ -1,11 +1,12 @@
 use crate::combat::DamageCooldown;
 use crate::components::{
-    AreaMultiplier, Combat, CooldownReduction, DamageMultiplier, Enemy, Experience, Health, Player,
+    AreaMultiplier, Combat, CooldownReduction, DamageMultiplier, Enemy, Experience, Health, Luck,
+    Player,
 };
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
+use crate::weapon::{BindingEffect, StartingWeapon, WeaponType};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
-use crate::weapon::{BindingEffect, StartingWeapon, WeaponType};
 
 // Startup system to load textures and create atlas layouts
 pub fn load_textures(
@@ -147,6 +148,7 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         CooldownReduction::default(), // Will be 0.0
         DamageMultiplier::default(),  // Will be 1.0
         AreaMultiplier::default(),    // Will be 1.0
+        Luck::default(),
         Sprite {
             image: game_textures.player.clone(),
             custom_size: Some(Vec2::new(32.0, 32.0)),
@@ -168,8 +170,8 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         },
         // Add Health component here
         Health {
-            current: 100.0,
-            maximum: 100.0,
+            current: 100,
+            maximum: 100,
         },
         DamageCooldown::default(),
         StartingWeapon(WeaponType::MagickCircle),
@@ -223,8 +225,8 @@ pub fn spawn_enemies(
             },
             Transform::from_translation(spawn_position),
             Health {
-                current: 20.0,
-                maximum: 20.0,
+                current: 20,
+                maximum: 20,
             },
         ));
     }

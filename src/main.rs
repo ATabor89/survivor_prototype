@@ -24,6 +24,7 @@ use crate::systems::{
     spawn_enemies, spawn_player, universal_input_system,
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
+use crate::upgrade::handle_generic_upgrade;
 use crate::weapon::WeaponPlugin;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
@@ -110,6 +111,10 @@ impl Plugin for SurvivorsGamePlugin {
                         .in_set(GameplaySets::Spawning)
                         .run_if(in_state(GameState::Playing)),
                 ),
+            )
+            .add_systems(
+                Update,
+                handle_generic_upgrade.run_if(in_state(GameState::Playing)),
             )
             // UI-related systems
             .add_systems(

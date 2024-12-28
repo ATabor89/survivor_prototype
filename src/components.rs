@@ -20,8 +20,8 @@ pub struct Projectile {
 
 #[derive(Component)]
 pub struct Health {
-    pub current: f32,
-    pub maximum: f32,
+    pub current: i32,
+    pub maximum: i32,
 }
 
 #[derive(Component)]
@@ -71,6 +71,9 @@ pub struct AreaMultiplier {
     pub factor: f32, // e.g., 1.2 for 120% area
 }
 
+#[derive(Component)]
+pub struct Luck(pub i32);
+
 impl Default for CooldownReduction {
     fn default() -> Self {
         Self { percent: 0.0 }
@@ -86,6 +89,12 @@ impl Default for DamageMultiplier {
 impl Default for AreaMultiplier {
     fn default() -> Self {
         Self { factor: 1.0 }
+    }
+}
+
+impl Default for Luck {
+    fn default() -> Self {
+        Self(20)
     }
 }
 

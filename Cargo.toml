@@ -11,8 +11,7 @@ bevy_prototype_lyon = "0.13.0"
 rand = "0.8.5"
 strum = "0.26.3"
 strum_macros = "0.26.4"
-bevy-panic-handler = "3.0.0"
-fastrand = "2.1.1"
+#bevy-panic-handler = "3.0.0"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

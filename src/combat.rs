@@ -5,7 +5,7 @@ use bevy::prelude::*;
 #[derive(Event)]
 pub struct DamageEvent {
     pub target: Entity,
-    pub amount: f32,
+    pub amount: i32,
     pub source: Option<Entity>,
 }
 
@@ -88,7 +88,7 @@ pub fn handle_damage(
                 old_health, health.current, event.target
             );
 
-            if health.current <= 0.0 {
+            if health.current <= 0 {
                 info!(
                     "Marking {:?} for death at health {}",
                     event.target, health.current

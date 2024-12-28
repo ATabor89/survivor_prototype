@@ -1,22 +1,75 @@
-use crate::components::{Player, PlayerStats};
+use crate::components::{Health, Luck, Player, PlayerStats};
 use crate::menu;
 use crate::menu::{
-    MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent, UpgradeType,
+    MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent,
 };
 use crate::types::{EquipmentType, Rarity, StatType};
-use crate::weapon::{WeaponConfig, WeaponInventory, WeaponType, MAX_WEAPON_LEVEL};
+use crate::weapon::{WeaponConfig, WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::color::{Alpha, Color};
 use bevy::hierarchy::{BuildChildren, ChildBuilder};
 use bevy::log::info;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
+use rand::prelude::*;
+use std::cmp::Ordering;
 use strum::IntoEnumIterator;
+
+pub fn handle_generic_upgrade(
+    mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
+    mut player_query: Query<&mut Health, With<Player>>,
+) {
+    for event in upgrade_events.read() {
+        if let UpgradeType::Generic(generic_upgrade) = &event.upgrade.upgrade_type {
+            match generic_upgrade {
+                GenericUpgrade::HealthPickup(amount) => {
+                    if let Ok(mut health) = player_query.get_single_mut() {
+                        let new_health = (health.current + amount).min(health.maximum);
+                        info!(
+                            "Healing player for {amount} (from {current} to {new})",
+                            amount = amount,
+                            current = health.current,
+                            new = new_health
+                        );
+                        health.current = new_health;
+                    }
+                }
+                GenericUpgrade::ResourcePickup(_) => {
+                    // We'll implement this later
+                    info!("Resource pickup not yet implemented");
+                }
+            }
+        }
+    }
+}
 
 #[derive(Resource)]
 pub struct UpgradePool {
     weapons: Vec<(WeaponType, Rarity)>,
     equipment: Vec<(EquipmentType, Rarity)>,
     stats: Vec<(StatType, Rarity)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GenericUpgrade {
+    HealthPickup(i32),   // Amount to heal
+    ResourcePickup(u32), // Amount of resource to gain
+}
+
+impl std::fmt::Display for GenericUpgrade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenericUpgrade::HealthPickup(_) => write!(f, "Philosopher's Elixir"),
+            GenericUpgrade::ResourcePickup(_) => write!(f, "Void Shards"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpgradeType {
+    Weapon(WeaponType, WeaponUpgrade),
+    Generic(GenericUpgrade),
+    Equipment(EquipmentType),
+    Stat(StatType),
 }
 
 impl Default for UpgradePool {
@@ -46,6 +99,21 @@ impl UpgradePool {
         }
     }
 
+    pub fn generate_generic_choices() -> Vec<UpgradeChoice> {
+        vec![
+            UpgradeChoice {
+                upgrade_type: UpgradeType::Generic(GenericUpgrade::HealthPickup(20)),
+                description: "Restore health with a Philosopher's Elixir".to_string(),
+                rarity: Rarity::Common,
+            },
+            UpgradeChoice {
+                upgrade_type: UpgradeType::Generic(GenericUpgrade::ResourcePickup(100)),
+                description: "Gather Void Shards".to_string(),
+                rarity: Rarity::Common,
+            },
+        ]
+    }
+
     pub fn generate_weapon_upgrades(inventory: &WeaponInventory) -> Vec<UpgradeChoice> {
         let mut upgrades = Vec::new();
 
@@ -61,46 +129,102 @@ impl UpgradePool {
                 let progression = weapon_config.weapon_type.get_progression();
                 if let Some(next_upgrade) = progression.get(weapon_config.level as usize - 1) {
                     info!("Next upgrade found: {:?}", next_upgrade);
+                    let level = weapon_config.level + 1;
+                    info!("Next level: {:?}", level);
                     upgrades.push(UpgradeChoice {
-                        upgrade_type: UpgradeType::Weapon(weapon_config.weapon_type, next_upgrade.clone()),
-                        description: format!(
-                            "{} Level {}, Add a second circle of banishment",
+                        upgrade_type: UpgradeType::Weapon(
                             weapon_config.weapon_type,
-                            weapon_config.level + 1,
+                            next_upgrade.clone(),
+                        ),
+                        description: format!(
+                            "{} Level {}, {}",
+                            weapon_config.weapon_type, level, next_upgrade,
                         ),
                         rarity: Rarity::Common, // We can make this more sophisticated later
                     });
                 }
+            } else {
+                info!("Weapon is at or above max level");
+                let limit_breaks = weapon_config.weapon_type.get_limit_break_options();
+                info!("Limit break options {:?}", limit_breaks);
+                let level = weapon_config.level + 1;
+                info!("Next level: {:?}", level);
+                for limit_break in limit_breaks {
+                    let description = format!(
+                        "{} Level {}, {}",
+                        weapon_config.weapon_type, level, limit_break
+                    );
+
+                    upgrades.push(UpgradeChoice {
+                        upgrade_type: UpgradeType::Weapon(weapon_config.weapon_type, limit_break),
+                        description,
+                        rarity: Rarity::Common,
+                    });
+                }
             }
         }
-        
+
         info!("Generated weapon upgrades: {:?}", upgrades);
 
         upgrades
     }
 
-    pub fn generate_choices(&self, count: usize) -> Vec<UpgradeChoice> {
-        // First get actual weapon upgrades
-        let mut choices = Vec::new();
+    pub fn generate_choices(&self, luck: &Luck, inventory: &WeaponInventory) -> Vec<UpgradeChoice> {
+        let mut rng = thread_rng();
 
-        // For now, hardcode player's weapon inventory since we haven't hooked that up yet
-        let inventory = WeaponInventory {
-            weapons: vec![WeaponConfig {
-                weapon_type: WeaponType::MagickCircle,
-                level: 1,
-            }],
-        };
+        // Determine the number of upgrades to show
+        let count = Self::calculate_count(luck, &mut rng);
 
-        let weapon_upgrades = Self::generate_weapon_upgrades(&inventory);
-        choices.extend(weapon_upgrades);
+        // Generate weapon-specific upgrades
+        let mut choices = Self::generate_weapon_upgrades(inventory);
 
-        // If we need more choices, we can fill with other types of upgrades
-        // (equipment, stats, etc.)
-        // while choices.len() < count {
-        //     // Add placeholder upgrades or leave empty depending on preference
-        // }
+        // Adjust the list to ensure the correct count
+        match choices.len().cmp(&count) {
+            Ordering::Greater => {
+                // Randomly select the required number of upgrades
+                choices = Self::select_random_owned(choices, count, &mut rng);
+            }
+            Ordering::Less => {
+                // Randomly select the needed number of generics to fill the gap
+                let needed_generics = Self::select_random_owned(
+                    Self::generate_generic_choices(),
+                    count - choices.len(),
+                    &mut rng,
+                );
+                choices.extend(needed_generics);
+            }
+            Ordering::Equal => (), // No adjustments needed
+        }
 
         choices
+    }
+
+    fn calculate_count(luck: &Luck, rng: &mut impl Rng) -> usize {
+        const LUCK_FACTOR: f32 = 0.02;
+        if rng.gen::<f32>() < (luck.0 as f32) * LUCK_FACTOR {
+            4
+        } else {
+            3
+        }
+    }
+
+    fn select_random<T>(pool: &[T], count: usize, rng: &mut impl Rng) -> Vec<T>
+    where
+        T: Clone,
+    {
+        pool.iter()
+            .choose_multiple(rng, count)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl Rng) -> Vec<T>
+    where
+        T: Clone,
+        I: IntoIterator<Item = T>,
+    {
+        iter.into_iter().choose_multiple(rng, count)
     }
 }
 
@@ -284,6 +408,17 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
                 choice.description.clone(),
             )
         }
+        UpgradeType::Generic(generic_type) => {
+            let icon = match generic_type {
+                GenericUpgrade::HealthPickup(_) => "⚗️",
+                GenericUpgrade::ResourcePickup(_) => "💎",
+            };
+            (
+                icon,
+                format!("{}", generic_type),
+                choice.description.clone(),
+            )
+        }
         UpgradeType::Equipment(equipment_type) => {
             let icon = match equipment_type {
                 EquipmentType::Armor => "🛡️",
@@ -338,6 +473,10 @@ pub fn apply_confirmed_upgrade(
                     info!("Adding equipment: {:?}", equipment_type);
                     // TODO: Implement equipment system
                 }
+                UpgradeType::Generic(generic_upgrade_type) => match generic_upgrade_type {
+                    GenericUpgrade::HealthPickup(_) => {}
+                    GenericUpgrade::ResourcePickup(_) => {}
+                },
             }
         }
     }

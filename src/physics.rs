@@ -230,7 +230,7 @@ pub fn handle_player_enemy_collision(
     if intersecting_enemies > 0 {
         damage_events.send(DamageEvent {
             target: player_entity,
-            amount: 1.0 * intersecting_enemies as f32,
+            amount: 1 * intersecting_enemies,
             source: None,
         });
     }
