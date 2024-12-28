@@ -10,7 +10,7 @@ mod systems;
 mod types;
 mod ui;
 mod upgrade;
-mod weapon;
+mod weapons;
 
 use crate::combat::{handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
@@ -25,7 +25,7 @@ use crate::systems::{
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
 use crate::upgrade::handle_generic_upgrade;
-use crate::weapon::WeaponPlugin;
+use crate::weapons::WeaponPlugin;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::ShapePlugin;

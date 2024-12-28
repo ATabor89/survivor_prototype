@@ -5,7 +5,7 @@ use crate::types::{Rarity, StatType};
 use crate::upgrade;
 use crate::upgrade::{UpgradePool, UpgradeType};
 use bevy::prelude::*;
-use crate::weapon::WeaponInventory;
+use crate::weapons::WeaponInventory;
 
 // Base menu components
 #[derive(Component)]

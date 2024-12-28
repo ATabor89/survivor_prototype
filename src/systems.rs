@@ -4,7 +4,7 @@ use crate::components::{
     Player,
 };
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
-use crate::weapon::{BindingEffect, StartingWeapon, WeaponType};
+use crate::weapons::{BindingEffect, StartingWeapon, WeaponType};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use crate::experience::Experience;

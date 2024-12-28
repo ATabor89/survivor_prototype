@@ -4,7 +4,7 @@ use crate::menu::{
     MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent,
 };
 use crate::types::{EquipmentType, Rarity, StatType};
-use crate::weapon::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
+use crate::weapons::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
 use bevy::color::{Alpha, Color};
 use bevy::hierarchy::{BuildChildren, ChildBuilder};
 use bevy::log::info;
