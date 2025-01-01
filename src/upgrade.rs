@@ -1,42 +1,39 @@
 use crate::components::{Health, Luck, Player};
 use crate::menu;
 use crate::menu::{
-    MenuAction, MenuActionComponent, MenuItem, UpgradeChoice, UpgradeConfirmedEvent,
+    GenericUpgradeConfirmedEvent, MenuAction, MenuActionComponent, MenuItem, UpgradeChoice,
 };
 use crate::types::{EquipmentType, Rarity, StatType};
-use crate::weapons::{WeaponInventory, WeaponType, WeaponUpgrade, MAX_WEAPON_LEVEL};
+use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
+use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::color::{Alpha, Color};
 use bevy::hierarchy::{BuildChildren, ChildBuilder};
 use bevy::log::info;
 use bevy::prelude::*;
-use bevy::utils::HashMap;
 use rand::prelude::*;
 use std::cmp::Ordering;
-use strum::IntoEnumIterator;
 
 pub fn handle_generic_upgrade(
-    mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
+    mut upgrade_events: EventReader<GenericUpgradeConfirmedEvent>,
     mut player_query: Query<&mut Health, With<Player>>,
 ) {
-    for event in upgrade_events.read() {
-        if let UpgradeType::Generic(generic_upgrade) = &event.upgrade.upgrade_type {
-            match generic_upgrade {
-                GenericUpgrade::HealthPickup(amount) => {
-                    if let Ok(mut health) = player_query.get_single_mut() {
-                        let new_health = (health.current + amount).min(health.maximum);
-                        info!(
-                            "Healing player for {amount} (from {current} to {new})",
-                            amount = amount,
-                            current = health.current,
-                            new = new_health
-                        );
-                        health.current = new_health;
-                    }
+    for generic_upgrade_event in upgrade_events.read() {
+        match generic_upgrade_event.generic_upgrade_type {
+            GenericUpgrade::HealthPickup(amount) => {
+                if let Ok(mut health) = player_query.get_single_mut() {
+                    let new_health = (health.current + amount).min(health.maximum);
+                    info!(
+                        "Healing player for {amount} (from {current} to {new})",
+                        amount = amount,
+                        current = health.current,
+                        new = new_health
+                    );
+                    health.current = new_health;
                 }
-                GenericUpgrade::ResourcePickup(_) => {
-                    // We'll implement this later
-                    info!("Resource pickup not yet implemented");
-                }
+            }
+            GenericUpgrade::ResourcePickup(_) => {
+                // We'll implement this later
+                info!("Resource pickup not yet implemented");
             }
         }
     }
@@ -66,10 +63,8 @@ impl std::fmt::Display for GenericUpgrade {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpgradeType {
-    Weapon(WeaponType, WeaponUpgrade),
+    Weapon(WeaponType, WeaponUpgradeSpec),
     Generic(GenericUpgrade),
-    Equipment(EquipmentType),
-    Stat(StatType),
 }
 
 impl Default for UpgradePool {
@@ -114,53 +109,35 @@ impl UpgradePool {
         ]
     }
 
-    pub fn generate_weapon_upgrades(inventory: &WeaponInventory) -> Vec<UpgradeChoice> {
+    pub fn generate_weapon_upgrades(
+        weapon_upgrade_config: &WeaponUpgradeConfig,
+        weapons: &[&WeaponMeta],
+    ) -> Vec<UpgradeChoice> {
         let mut upgrades = Vec::new();
 
-        for weapon_config in &inventory.weapons {
-            info!(
-                "Processing weapon config from inventory: {:?}",
-                weapon_config
-            );
+        for weapon_meta in weapons {
+            info!("Processing weapon config from inventory: {:?}", weapon_meta);
 
-            // If weapon isn't max level, get next upgrade
-            if weapon_config.level < MAX_WEAPON_LEVEL as u32 {
-                info!("Weapon is below max level");
-                let progression = weapon_config.weapon_type.get_progression();
-                if let Some(next_upgrade) = progression.get(weapon_config.level as usize - 1) {
-                    info!("Next upgrade found: {:?}", next_upgrade);
-                    let level = weapon_config.level + 1;
-                    info!("Next level: {:?}", level);
-                    upgrades.push(UpgradeChoice {
-                        upgrade_type: UpgradeType::Weapon(
-                            weapon_config.weapon_type,
-                            next_upgrade.clone(),
-                        ),
-                        description: format!(
-                            "{} Level {}, {}",
-                            weapon_config.weapon_type, level, next_upgrade,
-                        ),
-                        rarity: Rarity::Common, // We can make this more sophisticated later
-                    });
-                }
-            } else {
-                info!("Weapon is at or above max level");
-                let limit_breaks = weapon_config.weapon_type.get_limit_break_options();
-                info!("Limit break options {:?}", limit_breaks);
-                let level = weapon_config.level + 1;
-                info!("Next level: {:?}", level);
-                for limit_break in limit_breaks {
-                    let description = format!(
-                        "{} Level {}, {}",
-                        weapon_config.weapon_type, level, limit_break
-                    );
+            // Fetch the next upgrades from your config, using the weapon’s current level
+            let specs =
+                weapon_upgrade_config.get_next_upgrades(weapon_meta.weapon_type, weapon_meta.level);
 
-                    upgrades.push(UpgradeChoice {
-                        upgrade_type: UpgradeType::Weapon(weapon_config.weapon_type, limit_break),
-                        description,
-                        rarity: Rarity::Common,
-                    });
-                }
+            // For logging or reference
+            let next_level = weapon_meta.level + 1;
+            info!("Next level: {}", next_level);
+
+            // Convert each `WeaponUpgradeSpec` to an `UpgradeChoice`
+            for spec in specs {
+                let description = format!(
+                    "{} Level {}: {:?}",
+                    weapon_meta.weapon_type, next_level, spec
+                );
+
+                upgrades.push(UpgradeChoice {
+                    upgrade_type: UpgradeType::Weapon(weapon_meta.weapon_type, spec.clone()),
+                    description,
+                    rarity: Rarity::Common, // or more advanced logic
+                });
             }
         }
 
@@ -169,14 +146,19 @@ impl UpgradePool {
         upgrades
     }
 
-    pub fn generate_choices(&self, luck: &Luck, inventory: &WeaponInventory) -> Vec<UpgradeChoice> {
+    pub fn generate_choices(
+        &self,
+        weapon_upgrade_config: &WeaponUpgradeConfig,
+        luck: &Luck,
+        weapons: &[&WeaponMeta],
+    ) -> Vec<UpgradeChoice> {
         let mut rng = thread_rng();
 
         // Determine the number of upgrades to show
         let count = Self::calculate_count(luck, &mut rng);
 
         // Generate weapon-specific upgrades
-        let mut choices = Self::generate_weapon_upgrades(inventory);
+        let mut choices = Self::generate_weapon_upgrades(weapon_upgrade_config, weapons);
 
         // Adjust the list to ensure the correct count
         match choices.len().cmp(&count) {
@@ -225,103 +207,6 @@ impl UpgradePool {
         I: IntoIterator<Item = T>,
     {
         iter.into_iter().choose_multiple(rng, count)
-    }
-}
-
-// Track both the type and level of each upgrade
-#[derive(Component, Default)]
-pub struct UpgradeTracker {
-    // Track number of times each stat has been upgraded
-    pub stats: HashMap<StatType, u32>,
-    // Track weapon levels (Some(level) if owned, None if not owned)
-    pub weapons: HashMap<WeaponType, Option<u32>>,
-    // Track equipment levels
-    pub equipment: HashMap<EquipmentType, Option<u32>>,
-}
-
-impl UpgradeTracker {
-    pub fn new() -> Self {
-        let mut stats = HashMap::new();
-        let mut weapons = HashMap::new();
-        let mut equipment = HashMap::new();
-
-        // Initialize all possible stats at 0 upgrades
-        for stat_type in [
-            StatType::Health,
-            StatType::Speed,
-            StatType::Attack,
-            StatType::Defense,
-            StatType::Luck,
-        ] {
-            stats.insert(stat_type, 0);
-        }
-
-        // Initialize all weapons as not owned
-        for weapon_type in WeaponType::iter() {
-            weapons.insert(weapon_type, None);
-        }
-
-        weapons
-            .entry(WeaponType::MagickCircle)
-            .and_modify(|e| *e = Some(1));
-
-        // Initialize all equipment as not owned
-        for equipment_type in [
-            EquipmentType::Armor,
-            EquipmentType::Ring,
-            EquipmentType::Amulet,
-            EquipmentType::Boots,
-            EquipmentType::Gloves,
-        ] {
-            equipment.insert(equipment_type, None);
-        }
-
-        Self {
-            stats,
-            weapons,
-            equipment,
-        }
-    }
-
-    pub fn upgrade_stat(&mut self, stat_type: &StatType) -> u32 {
-        let count = self.stats.entry(stat_type.clone()).or_insert(0);
-        *count += 1;
-        *count
-    }
-
-    pub fn upgrade_weapon(&mut self, weapon_type: &WeaponType) -> u32 {
-        let level = self.weapons.entry(weapon_type.clone()).or_insert(None);
-        *level = Some(level.unwrap_or(0) + 1);
-        level.unwrap()
-    }
-
-    pub fn upgrade_equipment(&mut self, equipment_type: &EquipmentType) -> u32 {
-        let level = self.equipment.entry(equipment_type.clone()).or_insert(None);
-        *level = Some(level.unwrap_or(0) + 1);
-        level.unwrap()
-    }
-
-    pub fn get_stat_level(&self, stat_type: &StatType) -> u32 {
-        *self.stats.get(stat_type).unwrap_or(&0)
-    }
-
-    pub fn has_weapon(&self, weapon_type: &WeaponType) -> bool {
-        self.weapons.get(weapon_type).unwrap_or(&None).is_some()
-    }
-
-    pub fn get_weapon_level(&self, weapon_type: &WeaponType) -> Option<u32> {
-        *self.weapons.get(weapon_type).unwrap_or(&None)
-    }
-
-    pub fn has_equipment(&self, equipment_type: &EquipmentType) -> bool {
-        self.equipment
-            .get(equipment_type)
-            .unwrap_or(&None)
-            .is_some()
-    }
-
-    pub fn get_equipment_level(&self, equipment_type: &EquipmentType) -> Option<u32> {
-        *self.equipment.get(equipment_type).unwrap_or(&None)
     }
 }
 
@@ -419,42 +304,5 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
                 choice.description.clone(),
             )
         }
-        UpgradeType::Equipment(equipment_type) => {
-            let icon = match equipment_type {
-                EquipmentType::Armor => "🛡️",
-                EquipmentType::Ring => "💍",
-                EquipmentType::Amulet => "📿",
-                EquipmentType::Boots => "👢",
-                EquipmentType::Gloves => "🧤",
-            };
-            (
-                icon,
-                format!("{}", equipment_type),
-                choice.description.clone(),
-            )
-        }
-        UpgradeType::Stat(stat_type) => {
-            let icon = match stat_type {
-                StatType::Health => "❤️",
-                StatType::Speed => "👟",
-                StatType::Attack => "⚡",
-                StatType::Defense => "🛡️",
-                StatType::Luck => "🍀",
-            };
-            (
-                icon,
-                format!("{} Up", stat_type),
-                choice.description.clone(),
-            )
-        }
-    }
-}
-
-pub fn add_upgrade_tracking(
-    mut commands: Commands,
-    query: Query<Entity, (With<Player>, Without<UpgradeTracker>)>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).insert(UpgradeTracker::new());
     }
 }

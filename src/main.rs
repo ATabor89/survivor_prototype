@@ -16,7 +16,7 @@ use crate::combat::{handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
 use crate::events::EntityDeathEvent;
 use crate::experience::ExperiencePlugin;
-use crate::menu::MenuPlugin;
+use crate::menu::{GenericUpgradeConfirmedEvent, MenuPlugin};
 use crate::physics::PhysicsPlugin;
 use crate::resources::{GameState, GameStats, SpawnTimer, WaveConfig};
 use crate::systems::{
@@ -57,6 +57,7 @@ impl Plugin for SurvivorsGamePlugin {
             // Events
             .add_event::<DamageEvent>()
             .add_event::<EntityDeathEvent>()
+            .add_event::<GenericUpgradeConfirmedEvent>()
             // States
             .insert_state(GameState::Playing)
             // Plugins

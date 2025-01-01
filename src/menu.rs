@@ -1,11 +1,12 @@
 use crate::components::{Luck, Player};
 use crate::death::MarkedForDespawn;
 use crate::resources::GameState;
-use crate::types::{Rarity, StatType};
+use crate::types::Rarity;
 use crate::upgrade;
-use crate::upgrade::{UpgradePool, UpgradeType};
+use crate::upgrade::{GenericUpgrade, UpgradePool, UpgradeType};
+use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
+use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::prelude::*;
-use crate::weapons::WeaponInventory;
 
 // Base menu components
 #[derive(Component)]
@@ -48,8 +49,14 @@ pub struct UpgradeChoice {
 }
 
 #[derive(Event)]
-pub struct UpgradeConfirmedEvent {
-    pub upgrade: UpgradeChoice,
+pub struct WeaponUpgradeConfirmedEvent {
+    pub weapon_type: WeaponType,
+    pub upgrade_spec: WeaponUpgradeSpec,
+}
+
+#[derive(Event)]
+pub struct GenericUpgradeConfirmedEvent {
+    pub generic_upgrade_type: GenericUpgrade,
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -61,22 +68,26 @@ pub enum MenuSystemSet {
 
 pub fn spawn_level_up_menu(
     mut commands: Commands,
+    weapon_upgrade_config: Res<WeaponUpgradeConfig>,
     upgrade_pool: Res<UpgradePool>,
     existing_menu: Query<Entity, With<MenuRoot>>,
-    inventory_query: Query<(&Player, &WeaponInventory, &Luck)>,
+    weapon_query: Query<&WeaponMeta>,
+    luck_query: Query<(&Player, &Luck)>,
 ) {
     if !existing_menu.is_empty() {
         return;
     }
 
-    let Ok((_player, inventory, luck)) = inventory_query.get_single() else {
-        panic!("Unable to get weapon inventory or luck");
+    let Ok((_player, luck)) = luck_query.get_single() else {
+        panic!("Unable to get player luck");
     };
+
+    let weapons = weapon_query.iter().collect::<Vec<_>>();
 
     info!("Generating choices for level up menu");
 
     // Generate 3 random upgrade choices
-    let choices = upgrade_pool.generate_choices(luck, inventory);
+    let choices = upgrade_pool.generate_choices(weapon_upgrade_config.as_ref(), luck, &weapons);
 
     info!("Choices: {:?}", choices);
 
@@ -358,7 +369,8 @@ pub fn handle_upgrade_selection_and_confirmation(
     menu_query: Query<(Entity, &MenuType)>,
     menu_items: Query<(&MenuItem, &MenuActionComponent, &Interaction)>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut upgrade_events: EventWriter<UpgradeConfirmedEvent>,
+    mut weapon_upgrade_events: EventWriter<WeaponUpgradeConfirmedEvent>,
+    mut generic_upgrade_events: EventWriter<GenericUpgradeConfirmedEvent>,
 ) {
     // Only process for level up menu
     if !menu_query
@@ -376,10 +388,20 @@ pub fn handle_upgrade_selection_and_confirmation(
 
         if should_confirm {
             if let MenuAction::SelectUpgrade(upgrade) = &action_component.action {
-                // Send the upgrade event
-                upgrade_events.send(UpgradeConfirmedEvent {
-                    upgrade: upgrade.clone(),
-                });
+                match &upgrade.upgrade_type {
+                    UpgradeType::Weapon(weapon_type, weapon_upgrade_spec) => {
+                        // Send the upgrade event
+                        weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
+                            weapon_type: *weapon_type,
+                            upgrade_spec: weapon_upgrade_spec.clone(),
+                        });
+                    }
+                    UpgradeType::Generic(generic_upgrade) => {
+                        generic_upgrade_events.send(GenericUpgradeConfirmedEvent {
+                            generic_upgrade_type: generic_upgrade.clone(),
+                        });
+                    }
+                }
 
                 // Clean up menu
                 for (menu_entity, _) in menu_query.iter() {
@@ -399,7 +421,7 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<UpgradeConfirmedEvent>()
+        app.add_event::<WeaponUpgradeConfirmedEvent>()
             .configure_sets(
                 Update,
                 (

@@ -1,36 +1,50 @@
 use crate::combat::DamageEvent;
 use crate::components::{AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Player};
 use crate::death::MarkedForDeath;
-use crate::menu::UpgradeConfirmedEvent;
 use crate::physics::handle_rapier_context_error;
 use crate::resources::GameState;
-use crate::upgrade::UpgradeType;
+use crate::weapons::magick_circle::{
+    apply_magick_circle_weapon_upgrades, spawn_magick_circle, spawn_magick_circle_attack,
+    MagickCircle, PatternType,
+};
+use crate::weapons::weapon_upgrade::{
+    apply_common_weapon_upgrades, update_weapon_level, WeaponUpgradeConfig,
+};
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_rapier2d::prelude::*;
 use std::fmt::Formatter;
 use std::time::Duration;
 use strum_macros::EnumIter;
-use crate::weapons::magick_circle::{spawn_magick_circle, spawn_magick_circle_attack, MagickCircle, MagickCircleUpgrade, PatternType};
 
 mod magick_circle;
-
-pub static MAX_WEAPON_LEVEL: u8 = 8;
+pub mod weapon_upgrade;
 
 /// Plugin to register all weapon-related systems
 pub struct WeaponPlugin;
 
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<AddWeaponEvent>()
+        app.init_resource::<WeaponUpgradeConfig>()
+            .add_event::<AddWeaponEvent>()
             .add_event::<AreaEffectEvent>()
             .add_event::<BindingEvent>()
             .add_systems(
                 Update,
                 (
+                    update_weapon_level,
+                    (
+                        apply_common_weapon_upgrades,
+                        apply_magick_circle_weapon_upgrades,
+                    )
+                        .after(update_weapon_level),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
                     setup_player_inventory,
                     handle_new_weapons,
-                    handle_weapon_upgrade,
                     weapon_firing_system,
                     update_weapon_positions,
                     area_effect_system,
@@ -46,35 +60,10 @@ impl Plugin for WeaponPlugin {
 }
 
 /// Core weapon type identifier
-#[derive(Component)]
-pub struct Weapon {
+#[derive(Debug, Component)]
+pub struct WeaponMeta {
     pub weapon_type: WeaponType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WeaponStat {
-    Damage,
-    Area,
-    Duration,
-    Cooldown,
-}
-
-impl std::fmt::Display for WeaponStat {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WeaponStat::Damage => write!(f, "Damage"),
-            WeaponStat::Area => write!(f, "Area"),
-            WeaponStat::Duration => write!(f, "Duration"),
-            WeaponStat::Cooldown => write!(f, "Cooldown"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct WeaponConfig {
-    pub(crate) weapon_type: WeaponType,
-    pub(crate) level: u32,
-    // Could add other configuration here like variants/modifiers
+    pub level: u32,
 }
 
 // Component to define what weapon a player starts with
@@ -104,10 +93,8 @@ pub struct BindingEvent {
     pub source: Entity,
 }
 
-#[derive(Debug, Component)]
-pub struct WeaponInventory {
-    pub(crate) weapons: Vec<WeaponConfig>,
-}
+#[derive(Component)]
+pub struct WeaponInventory;
 
 // This runs once on player spawn and handles the starting weapon
 pub fn setup_player_inventory(
@@ -115,14 +102,7 @@ pub fn setup_player_inventory(
     query: Query<(Entity, &StartingWeapon), (Added<Player>, Without<WeaponInventory>)>,
 ) {
     for (player_entity, starting_weapon) in query.iter() {
-        let inventory = WeaponInventory {
-            weapons: vec![WeaponConfig {
-                weapon_type: starting_weapon.0,
-                level: 1,
-            }],
-        };
-
-        commands.entity(player_entity).insert(inventory);
+        commands.entity(player_entity).insert(WeaponInventory);
         spawn_weapon(&mut commands, player_entity, starting_weapon.0);
     }
 }
@@ -131,104 +111,9 @@ pub fn setup_player_inventory(
 pub fn handle_new_weapons(
     mut commands: Commands,
     mut events: EventReader<AddWeaponEvent>,
-    mut inventories: Query<&mut WeaponInventory>,
 ) {
     for event in events.read() {
-        if let Ok(mut inventory) = inventories.get_mut(event.player) {
-            inventory.weapons.push(WeaponConfig {
-                weapon_type: event.weapon_type,
-                level: 1,
-            });
-            spawn_weapon(&mut commands, event.player, event.weapon_type);
-        }
-    }
-}
-
-pub fn handle_weapon_upgrade(
-    mut upgrade_events: EventReader<UpgradeConfirmedEvent>,
-    mut weapon_query: Query<(
-        &Parent,
-        &mut MagickCircle,
-        &mut WeaponCooldown,
-        &mut WeaponDamage,
-        &mut WeaponArea,
-    )>,
-    mut player_query: Query<(Entity, &mut WeaponInventory)>,
-) {
-    for event in upgrade_events.read() {
-        if let UpgradeType::Weapon(weapon_type, upgrade) = &event.upgrade.upgrade_type {
-            if let Ok((player_entity, mut inventory)) = player_query.get_single_mut() {
-                // Update the weapon config in inventory
-                if let Some(weapon_config) = inventory
-                    .weapons
-                    .iter_mut()
-                    .find(|w| w.weapon_type == *weapon_type)
-                {
-                    // Increment the level
-                    weapon_config.level += 1;
-
-                    // Find and update the actual weapon component
-                    for (parent, mut circle, mut cooldown, mut damage, mut area) in
-                        weapon_query.iter_mut()
-                    {
-                        if parent.get() == player_entity {
-                            match upgrade {
-                                WeaponUpgrade::MagickCircle(upgrade) => {
-                                    let upgrades: Vec<&MagickCircleUpgrade> = {
-                                        if let MagickCircleUpgrade::Combined(upgrades) = upgrade {
-                                            upgrades.iter().collect()
-                                        } else {
-                                            vec![upgrade]
-                                        }
-                                    };
-
-                                    for upgrade in upgrades {
-                                        match upgrade {
-                                            MagickCircleUpgrade::AddCircle { pattern, .. } => {
-                                                info!(
-                                                    "Adding new circle pattern: {:?} at level {}",
-                                                    pattern, weapon_config.level
-                                                );
-                                                circle.patterns.push(*pattern);
-                                            }
-                                            MagickCircleUpgrade::StatUpgrade {
-                                                stat,
-                                                bonus,
-                                                ..
-                                            } => {
-                                                match stat {
-                                                    WeaponStat::Damage => {
-                                                        damage.damage_bonus += bonus;
-                                                    }
-                                                    WeaponStat::Area => {
-                                                        area.area_bonus += bonus;
-                                                    }
-                                                    WeaponStat::Cooldown => {
-                                                        // The bonus already comes in negative
-                                                        cooldown.cooldown_bonus += bonus;
-                                                    }
-                                                    WeaponStat::Duration => {
-                                                        // We'll need to add this component/field
-                                                    }
-                                                }
-                                                info!(
-                                                    "Upgraded {:?} by {} at level {}",
-                                                    stat, bonus, weapon_config.level
-                                                );
-                                            }
-                                            MagickCircleUpgrade::Combined(_) => {
-                                                unreachable!("You should not be here. You have violated the laws of nature.")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                info!("Updated weapon inventory: {:?}", inventory);
-            }
-        }
+        spawn_weapon(&mut commands, event.player, event.weapon_type);
     }
 }
 
@@ -239,7 +124,7 @@ pub enum WeaponType {
 }
 
 impl std::fmt::Display for WeaponType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MagickCircle => write!(f, "Magick Circle"),
         }
@@ -300,15 +185,7 @@ pub struct Area {
 
 /// Attack-specific components
 #[derive(Component)]
-pub struct Attack {
-    pub attack_type: AttackType,
-}
-
-#[derive(Component, Clone)]
-pub enum AttackType {
-    MagickCircle,
-    // Future attack types...
-}
+pub struct Attack; // Formerly held an AttackType enum
 
 #[derive(Component)]
 pub struct Lifetime {
@@ -319,152 +196,6 @@ pub struct Lifetime {
 pub struct Rotates {
     pub speed: f32,
     pub current_angle: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum WeaponUpgrade {
-    MagickCircle(MagickCircleUpgrade),
-}
-
-impl std::fmt::Display for WeaponUpgrade {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WeaponUpgrade::MagickCircle(magick_circle_upgrade) => {
-                write!(f, "{}", magick_circle_upgrade)
-            }
-        }
-    }
-}
-
-impl WeaponType {
-    pub fn get_progression(&self) -> Vec<WeaponUpgrade> {
-        match self {
-            WeaponType::MagickCircle => vec![
-                // Level 2: Initial power boost
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::Combined(vec![
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Damage,
-                        bonus: 2,
-                        is_limit_break: false,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Area,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                ])),
-                // Level 3: First additional circle
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::AddCircle {
-                    pattern: PatternType::Banishment,
-                    offset_angle: std::f32::consts::PI,
-                }),
-                // Level 4: Second circle + minor boost
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::Combined(vec![
-                    MagickCircleUpgrade::AddCircle {
-                        pattern: PatternType::Banishment,
-                        offset_angle: std::f32::consts::PI * 0.5,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Damage,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Area,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                ])),
-                // Level 5: Third circle
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::AddCircle {
-                    pattern: PatternType::Banishment,
-                    offset_angle: std::f32::consts::PI * 1.5,
-                }),
-                // Level 6: Significant power boost + fourth circle
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::Combined(vec![
-                    MagickCircleUpgrade::AddCircle {
-                        pattern: PatternType::Banishment,
-                        offset_angle: std::f32::consts::PI * 2.0,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Damage,
-                        bonus: 2,
-                        is_limit_break: false,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Area,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                ])),
-                // Level 7: Fifth circle + minor boost
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::Combined(vec![
-                    MagickCircleUpgrade::AddCircle {
-                        pattern: PatternType::Banishment,
-                        offset_angle: std::f32::consts::PI * 2.5,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Damage,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Area,
-                        bonus: 1,
-                        is_limit_break: false,
-                    },
-                ])),
-                // Level 8: Final circle + major power spike
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::Combined(vec![
-                    MagickCircleUpgrade::AddCircle {
-                        pattern: PatternType::Banishment,
-                        offset_angle: std::f32::consts::PI * 3.0,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Damage,
-                        bonus: 3,
-                        is_limit_break: false,
-                    },
-                    MagickCircleUpgrade::StatUpgrade {
-                        stat: WeaponStat::Area,
-                        bonus: 2,
-                        is_limit_break: false,
-                    },
-                ])),
-            ],
-        }
-    }
-
-    pub fn get_limit_break_options(&self) -> Vec<WeaponUpgrade> {
-        match self {
-            WeaponType::MagickCircle => vec![
-                // Raw damage
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::StatUpgrade {
-                    stat: WeaponStat::Damage,
-                    bonus: 2,
-                    is_limit_break: true,
-                }),
-                // Area of effect
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::StatUpgrade {
-                    stat: WeaponStat::Area,
-                    bonus: 2,
-                    is_limit_break: true,
-                }),
-                // Duration focus (circles last longer)
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::StatUpgrade {
-                    stat: WeaponStat::Duration,
-                    bonus: 2,
-                    is_limit_break: true,
-                }),
-                // Speed focus (spawn more frequently)
-                WeaponUpgrade::MagickCircle(MagickCircleUpgrade::StatUpgrade {
-                    stat: WeaponStat::Cooldown,
-                    bonus: -2,
-                    is_limit_break: true,
-                }),
-            ],
-        }
-    }
 }
 
 #[derive(Component)]
@@ -479,8 +210,6 @@ pub struct Orbits {
     pub speed: f32,
     pub current_angle: f32,
 }
-
-
 
 /// Optional weapon modifiers
 #[derive(Component)]
@@ -530,7 +259,7 @@ pub fn weapon_firing_system(
         &mut WeaponCooldown,
         &WeaponDamage,
         &WeaponArea,
-        &Weapon,
+        &WeaponMeta,
     )>,
     // Query specific weapon types for their unique properties
     magick_circle_query: Query<&MagickCircle>,
@@ -541,12 +270,12 @@ pub fn weapon_firing_system(
         // info!("Processing weapon: {:?}", weapon_entity);
 
         if let Ok((
-                      _player_entity,
-                      cooldown_reduction,
-                      damage_multiplier,
-                      area_multiplier,
-                      player_transform,
-                  )) = player_query.get(parent.get())
+            _player_entity,
+            cooldown_reduction,
+            damage_multiplier,
+            area_multiplier,
+            player_transform,
+        )) = player_query.get(parent.get())
         {
             // info!("Found player stats - CD reduction: {}, damage mult: {}, area mult: {}",
             //     cooldown_reduction.percent,
@@ -564,7 +293,9 @@ pub fn weapon_firing_system(
             cooldown.timer.tick(time.delta());
 
             let damage_percent = (100 + damage.damage_bonus) as f32 / 100.0;
-            let effective_damage = (damage.base_amount as f32 * damage_percent * damage_multiplier.factor).floor() as i32;
+            let effective_damage =
+                (damage.base_amount as f32 * damage_percent * damage_multiplier.factor).floor()
+                    as i32;
 
             let area_percent = (100 + area.area_bonus) as f32 / 100.0;
             let effective_radius = area.base_radius * area_percent * area_multiplier.factor;
@@ -794,4 +525,3 @@ fn orbital_movement_system(
         transform.translation = Vec3::new(offset.x, offset.y, transform.translation.z);
     }
 }
-

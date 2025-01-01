@@ -1,3 +1,9 @@
+use crate::menu::WeaponUpgradeConfirmedEvent;
+use crate::weapons::weapon_upgrade::WeaponUpgradeChange;
+use crate::weapons::{
+    Area, AreaEffect, Attack, Damage, Lifetime, Orbits, Rotates, Sigil, WeaponArea,
+    WeaponCooldown, WeaponDamage, WeaponMeta, WeaponMovement, WeaponType,
+};
 use bevy::color::Color;
 use bevy::log::info;
 use bevy::math::{Vec2, Vec3};
@@ -8,59 +14,12 @@ use bevy_prototype_lyon::geometry::GeometryBuilder;
 use bevy_prototype_lyon::prelude::RectangleOrigin;
 use bevy_prototype_lyon::shapes;
 use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group, Sensor};
-use crate::weapons::{Area, AreaEffect, Attack, AttackType, Damage, Lifetime, Orbits, Rotates, Sigil, Weapon, WeaponArea, WeaponCooldown, WeaponDamage, WeaponMovement, WeaponStat, WeaponType};
 
 /// Specialized MagickCircle components
 #[derive(Component)]
 pub struct MagickCircle {
     pub patterns: Vec<PatternType>,
     pub num_sigils: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MagickCircleUpgrade {
-    AddCircle {
-        pattern: PatternType,
-        offset_angle: f32, // Where to position the new circle
-    },
-    StatUpgrade {
-        stat: WeaponStat,
-        bonus: i32,
-        is_limit_break: bool,
-    },
-    Combined(Vec<MagickCircleUpgrade>),
-}
-
-impl std::fmt::Display for MagickCircleUpgrade {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            MagickCircleUpgrade::AddCircle { pattern, .. } => {
-                write!(f, "Add a {} Magick Circle", pattern)
-            }
-            MagickCircleUpgrade::StatUpgrade {
-                stat,
-                bonus: multiplier,
-                ..
-            } => {
-                let improvement_type = match stat {
-                    WeaponStat::Cooldown => "Decrease",
-                    _ => "Increase",
-                };
-                write!(f, "{} {} by {}%", improvement_type, stat, multiplier)
-            }
-            MagickCircleUpgrade::Combined(magick_circle_upgrades) => {
-                write!(
-                    f,
-                    "{}",
-                    magick_circle_upgrades
-                        .iter()
-                        .map(MagickCircleUpgrade::to_string)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            }
-        }
-    }
 }
 
 #[derive(Component, Debug, Copy, Clone, Eq, PartialEq)]
@@ -91,8 +50,9 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
         // Spawn the base weapon entity
         parent.spawn((
             // Core weapon components
-            Weapon {
+            WeaponMeta {
                 weapon_type: WeaponType::MagickCircle,
+                level: 1,
             },
             WeaponCooldown {
                 timer: Timer::from_seconds(3.5, TimerMode::Repeating),
@@ -151,9 +111,7 @@ pub fn spawn_magick_circle_attack(
     // First spawn the attack entity
     let attack_entity = commands
         .spawn((
-            Attack {
-                attack_type: AttackType::MagickCircle,
-            },
+            Attack,
             Lifetime {
                 timer: Timer::from_seconds(3.0, TimerMode::Once),
             },
@@ -162,7 +120,7 @@ pub fn spawn_magick_circle_attack(
                 current_angle: 0.0,
             },
             Damage { amount: damage },
-            Area { radius: radius },
+            Area { radius },
             AreaEffect {
                 duration: 0.5,
                 tick_rate: 0.5,
@@ -221,4 +179,29 @@ pub fn spawn_magick_circle_attack(
     }
 
     attack_entity
+}
+
+pub fn apply_magick_circle_weapon_upgrades(
+    mut upgrade_events: EventReader<WeaponUpgradeConfirmedEvent>,
+    mut weapon_query: Query<(&mut MagickCircle, &WeaponMeta)>,
+) {
+    for upgrade_event in upgrade_events.read() {
+        // We already have the final `upgrade_spec` in `upgrade_event`
+        for (mut circle, meta) in weapon_query.iter_mut() {
+            if meta.weapon_type == upgrade_event.weapon_type {
+                for change in &upgrade_event.upgrade_spec.changes {
+                    match &change {
+                        WeaponUpgradeChange::AddCircle { pattern } => {
+                            info!(
+                                "Adding new Magick Circle pattern: {:?} at level {}",
+                                pattern, meta.level
+                            );
+                            circle.patterns.push(*pattern);
+                        }
+                        _ => (),
+                    }
+                }
+            }
+        }
+    }
 }
