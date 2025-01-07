@@ -4,9 +4,47 @@ use crate::resources::GameState;
 use crate::types::Rarity;
 use crate::upgrade;
 use crate::upgrade::{GenericUpgrade, UpgradePool, UpgradeType};
-use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
+use crate::weapons::magick_circle::PatternType;
+use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::prelude::*;
+use bevy_rapier2d::na::DimAdd;
+use strum::IntoEnumIterator;
+
+// Plugin to organize it all
+pub struct MenuPlugin;
+
+impl Plugin for MenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_event::<WeaponUpgradeConfirmedEvent>()
+            .configure_sets(
+                Update,
+                (
+                    MenuSystemSet::Navigation,
+                    MenuSystemSet::Selection,
+                    MenuSystemSet::Confirmation,
+                )
+                    .chain(),
+            )
+            // Menu systems
+            .add_systems(
+                Update,
+                (
+                    menu_navigation,
+                    handle_menu_interactions,
+                    update_menu_buttons,
+                    handle_upgrade_selection_and_confirmation,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
+            )
+            // State transitions
+            .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
+            .add_systems(OnExit(GameState::Paused), cleanup_menu_state)
+            .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
+            .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state);
+    }
+}
 
 // Base menu components
 #[derive(Component)]
@@ -24,11 +62,12 @@ pub struct MenuActionComponent {
     pub action: MenuAction,
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Eq, PartialEq)]
 pub enum MenuType {
     Main,
     Pause,
     LevelUp,
+    PatternSelect,
 }
 
 // Simplified menu actions
@@ -38,6 +77,7 @@ pub enum MenuAction {
     ResumeGame,
     QuitGame,
     SelectUpgrade(UpgradeChoice),
+    SelectPattern(PatternType),
 }
 
 // Level-up specific components
@@ -140,6 +180,58 @@ pub fn spawn_level_up_menu(
                     // Spawn upgrade choices
                     for (index, choice) in choices.iter().enumerate() {
                         upgrade::spawn_upgrade_choice(parent, choice.clone(), index == 0);
+                    }
+                });
+        });
+}
+
+// Add pattern selection menu spawning
+pub fn spawn_pattern_select_menu(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(100),
+            BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.8)),
+            MenuRoot {
+                menu_type: MenuType::PatternSelect,
+            },
+        ))
+        .with_children(|parent| {
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(20.0),
+                    width: Val::Px(600.0),
+                    padding: UiRect::all(Val::Px(30.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Select Circle Pattern"),
+                        TextFont {
+                            font_size: 48.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(1.0, 0.8, 0.0)),
+                    ));
+
+                    // Spawn buttons for each pattern type
+                    for (i, pattern) in PatternType::iter().enumerate() {
+                        spawn_menu_button(
+                            parent,
+                            &format!("{}: {}", pattern, pattern.get_description()),
+                            MenuAction::SelectPattern(pattern),
+                            i == 0, // First one selected by default
+                        );
                     }
                 });
         });
@@ -360,9 +452,11 @@ fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>
         // MenuAction::OpenSettings => next_state.set(GameState::Playing), // Until settings is implemented
         MenuAction::QuitGame => next_state.set(GameState::Quit),
         MenuAction::SelectUpgrade(_) => {} // Handled by upgrade system
+        MenuAction::SelectPattern(_) => {}
     }
 }
 
+/// Same function you're using, but with the new approach
 pub fn handle_upgrade_selection_and_confirmation(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -375,78 +469,138 @@ pub fn handle_upgrade_selection_and_confirmation(
     // Only process for level up menu
     if !menu_query
         .iter()
-        .any(|(_, menu_type)| matches!(menu_type, MenuType::LevelUp))
+        .any(|(_, menu_type)| *menu_type == MenuType::LevelUp)
     {
         return;
     }
 
-    // Handle confirmation via keyboard or mouse
-    for (menu_item, action_component, interaction) in menu_items.iter() {
+    // Check keyboard/mouse selection
+    for (menu_item, action_component, interaction) in &menu_items {
         let should_confirm = (menu_item.selected
             && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
             || *interaction == Interaction::Pressed;
 
         if should_confirm {
-            if let MenuAction::SelectUpgrade(upgrade) = &action_component.action {
-                match &upgrade.upgrade_type {
-                    UpgradeType::Weapon(weapon_type, weapon_upgrade_spec) => {
-                        // Send the upgrade event
-                        weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
-                            weapon_type: *weapon_type,
-                            upgrade_spec: weapon_upgrade_spec.clone(),
+            if let MenuAction::SelectUpgrade(upgrade_choice) = &action_component.action {
+                match &upgrade_choice.upgrade_type {
+                    UpgradeType::Weapon(weapon_type, upgrade_spec) => {
+                        // 1. Check if it has an AddCircle { pattern: None } in `changes`
+                        let has_add_circle = upgrade_spec.changes.iter().any(|change| {
+                            matches!(change, WeaponUpgradeChange::AddCircle { pattern: None })
                         });
+
+                        if has_add_circle {
+                            // 2. Despawn the level-up menu so we can show pattern-select
+                            for (menu_entity, _) in &menu_query {
+                                commands.entity(menu_entity).despawn_recursive();
+                            }
+
+                            // 3. Insert a resource telling us which upgrade we’re finalizing
+                            commands.insert_resource(PendingAddCircleUpgrade {
+                                weapon_type: *weapon_type,
+                                upgrade_spec: upgrade_spec.clone(),
+                            });
+
+                            // 4. Spawn the pattern-select menu
+                            spawn_pattern_select_menu(&mut commands);
+
+                            // Don’t next_state.set(GameState::Playing) yet!
+                            // We’ll do that after pattern selection.
+                        } else {
+                            // Normal upgrade that doesn't require pattern selection
+                            weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
+                                weapon_type: *weapon_type,
+                                upgrade_spec: upgrade_spec.clone(),
+                            });
+
+                            // Despawn menu and go back to playing
+                            for (menu_entity, _) in &menu_query {
+                                commands.entity(menu_entity).despawn_recursive();
+                            }
+                            next_state.set(GameState::Playing);
+                        }
                     }
                     UpgradeType::Generic(generic_upgrade) => {
+                        // This is a normal generic upgrade
                         generic_upgrade_events.send(GenericUpgradeConfirmedEvent {
                             generic_upgrade_type: generic_upgrade.clone(),
                         });
+
+                        // Despawn and return to gameplay
+                        for (menu_entity, _) in &menu_query {
+                            commands.entity(menu_entity).despawn_recursive();
+                        }
+                        next_state.set(GameState::Playing);
                     }
                 }
-
-                // Clean up menu
-                for (menu_entity, _) in menu_query.iter() {
-                    commands.entity(menu_entity).despawn_recursive();
-                }
-
-                // Return to playing state
-                next_state.set(GameState::Playing);
                 break;
             }
         }
     }
 }
 
-// Plugin to organize it all
-pub struct MenuPlugin;
+#[derive(Resource, Debug)]
+pub struct PendingAddCircleUpgrade {
+    pub weapon_type: WeaponType,
+    pub upgrade_spec: WeaponUpgradeSpec,
+}
 
-impl Plugin for MenuPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_event::<WeaponUpgradeConfirmedEvent>()
-            .configure_sets(
-                Update,
-                (
-                    MenuSystemSet::Navigation,
-                    MenuSystemSet::Selection,
-                    MenuSystemSet::Confirmation,
-                )
-                    .chain(),
-            )
-            // Menu systems
-            .add_systems(
-                Update,
-                (
-                    menu_navigation,
-                    handle_menu_interactions,
-                    update_menu_buttons,
-                    handle_upgrade_selection_and_confirmation,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
-            )
-            // State transitions
-            .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
-            .add_systems(OnExit(GameState::Paused), cleanup_menu_state)
-            .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
-            .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state);
+pub fn handle_pattern_select_menu(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    menu_query: Query<(Entity, &MenuType)>,
+    buttons: Query<(&MenuItem, &MenuActionComponent, &Interaction), With<Button>>,
+    mut pending_add_circle: Option<ResMut<PendingAddCircleUpgrade>>,
+    mut weapon_upgrade_events: EventWriter<WeaponUpgradeConfirmedEvent>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    // Make sure we only do this if the pattern-select menu is up
+    let pattern_select_active = menu_query
+        .iter()
+        .any(|(_, mtype)| *mtype == MenuType::PatternSelect);
+
+    if !pattern_select_active {
+        return;
+    }
+
+    for (menu_item, action_component, interaction) in &buttons {
+        let should_confirm = (menu_item.selected
+            && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
+            || *interaction == Interaction::Pressed;
+
+        if should_confirm {
+            if let MenuAction::SelectPattern(chosen_pattern) = action_component.action {
+                // If we had a pending AddCircle upgrade
+                if let Some(mut pending) = pending_add_circle.take() {
+                    // Fill in the pattern
+                    for change in &mut pending.upgrade_spec.changes {
+                        if let WeaponUpgradeChange::AddCircle { pattern } = change {
+                            if pattern.is_none() {
+                                *pattern = Some(chosen_pattern);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Now that we have a real pattern, we can finalize
+                    weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
+                        weapon_type: pending.weapon_type,
+                        upgrade_spec: pending.upgrade_spec.clone(),
+                    });
+                }
+
+                // Despawn the pattern menu
+                for (entity, menu_type) in &menu_query {
+                    if *menu_type == MenuType::PatternSelect {
+                        commands.entity(entity).despawn_recursive();
+                    }
+                }
+
+                // Return to normal gameplay
+                next_state.set(GameState::Playing);
+
+                break;
+            }
+        }
     }
 }

@@ -17,7 +17,7 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use strum_macros::EnumIter;
 
-mod magick_circle;
+pub mod magick_circle;
 pub mod weapon_upgrade;
 
 /// Plugin to register all weapon-related systems
@@ -26,6 +26,7 @@ pub struct WeaponPlugin;
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponUpgradeConfig>()
+            .insert_resource(WeaponPickupCounter(0))
             .add_event::<AddWeaponEvent>()
             .add_event::<AreaEffectEvent>()
             .add_event::<BindingEvent>()
@@ -64,7 +65,11 @@ impl Plugin for WeaponPlugin {
 pub struct WeaponMeta {
     pub weapon_type: WeaponType,
     pub level: u32,
+    pub pickup_id: u8,
 }
+
+#[derive(Resource)]
+pub struct WeaponPickupCounter(u8);
 
 // Component to define what weapon a player starts with
 #[derive(Component)]
@@ -93,17 +98,16 @@ pub struct BindingEvent {
     pub source: Entity,
 }
 
-#[derive(Component)]
-pub struct WeaponInventory;
-
 // This runs once on player spawn and handles the starting weapon
 pub fn setup_player_inventory(
-    mut commands: Commands,
-    query: Query<(Entity, &StartingWeapon), (Added<Player>, Without<WeaponInventory>)>,
+    query: Query<(Entity, &StartingWeapon), Added<Player>>,
+    mut add_weapon_event: EventWriter<AddWeaponEvent>,
 ) {
     for (player_entity, starting_weapon) in query.iter() {
-        commands.entity(player_entity).insert(WeaponInventory);
-        spawn_weapon(&mut commands, player_entity, starting_weapon.0);
+        add_weapon_event.send(AddWeaponEvent {
+            player: player_entity,
+            weapon_type: starting_weapon.0
+        });
     }
 }
 
@@ -111,9 +115,13 @@ pub fn setup_player_inventory(
 pub fn handle_new_weapons(
     mut commands: Commands,
     mut events: EventReader<AddWeaponEvent>,
+    mut weapon_pickup_counter: ResMut<WeaponPickupCounter>
 ) {
     for event in events.read() {
-        spawn_weapon(&mut commands, event.player, event.weapon_type);
+        let pickup_id = weapon_pickup_counter.0;
+        spawn_weapon(&mut commands, event.player, event.weapon_type, pickup_id);
+        
+        weapon_pickup_counter.0 += 1;
     }
 }
 
@@ -230,9 +238,9 @@ pub struct Knockback {
 }
 
 /// Spawns a weapon for the player based on weapon type
-pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType) {
+pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType, pickup_id: u8) {
     match weapon_type {
-        WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity),
+        WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity, pickup_id),
         // Add other weapon types here
     }
 }

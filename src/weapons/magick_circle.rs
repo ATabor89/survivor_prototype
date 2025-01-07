@@ -1,8 +1,8 @@
 use crate::menu::WeaponUpgradeConfirmedEvent;
 use crate::weapons::weapon_upgrade::WeaponUpgradeChange;
 use crate::weapons::{
-    Area, AreaEffect, Attack, Damage, Lifetime, Orbits, Rotates, Sigil, WeaponArea,
-    WeaponCooldown, WeaponDamage, WeaponMeta, WeaponMovement, WeaponType,
+    Area, AreaEffect, Attack, Damage, Lifetime, Orbits, Rotates, Sigil, WeaponArea, WeaponCooldown,
+    WeaponDamage, WeaponMeta, WeaponMovement, WeaponType,
 };
 use bevy::color::Color;
 use bevy::log::info;
@@ -14,6 +14,8 @@ use bevy_prototype_lyon::geometry::GeometryBuilder;
 use bevy_prototype_lyon::prelude::RectangleOrigin;
 use bevy_prototype_lyon::shapes;
 use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group, Sensor};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
 /// Specialized MagickCircle components
 #[derive(Component)]
@@ -22,13 +24,13 @@ pub struct MagickCircle {
     pub num_sigils: u32,
 }
 
-#[derive(Component, Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Component, Debug, Copy, Clone, Eq, PartialEq, EnumIter)]
 pub enum PatternType {
-    Protection,    // Basic defensive circle
-    Binding,       // Slows/holds enemies
     Banishment,    // Damages/pushes enemies
+    Binding,       // Slows/holds enemies
     Invocation,    // Attracts/pulls enemies
     Manifestation, // Creates effects over time
+    Protection,    // Basic defensive circle
 }
 
 impl std::fmt::Display for PatternType {
@@ -43,8 +45,22 @@ impl std::fmt::Display for PatternType {
     }
 }
 
+impl PatternType {
+    pub fn get_description(&self) -> String {
+        match self {
+            PatternType::Protection => {
+                "Creates a defensive circle that reduces incoming damage".to_string()
+            }
+            PatternType::Binding => "Slows enemies within the circle".to_string(),
+            PatternType::Banishment => "Damages enemies within the circle".to_string(),
+            PatternType::Invocation => "Pulls enemies toward the circle's center".to_string(),
+            PatternType::Manifestation => "Creates periodic effects within the circle".to_string(),
+        }
+    }
+}
+
 /// Spawns a magick circle weapon with default configuration
-pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
+pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, pickup_id: u8) {
     info!("Spawning magick circle for player: {:?}", player_entity);
     commands.entity(player_entity).with_children(|parent| {
         // Spawn the base weapon entity
@@ -53,6 +69,7 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
             WeaponMeta {
                 weapon_type: WeaponType::MagickCircle,
                 level: 1,
+                pickup_id,
             },
             WeaponCooldown {
                 timer: Timer::from_seconds(3.5, TimerMode::Repeating),
@@ -196,7 +213,7 @@ pub fn apply_magick_circle_weapon_upgrades(
                                 "Adding new Magick Circle pattern: {:?} at level {}",
                                 pattern, meta.level
                             );
-                            circle.patterns.push(*pattern);
+                            circle.patterns.push(pattern.expect("Unable to add new Magick Circle pattern; upgrade event's pattern was `None`"));
                         }
                         _ => (),
                     }
@@ -204,4 +221,10 @@ pub fn apply_magick_circle_weapon_upgrades(
             }
         }
     }
+}
+
+pub struct PatternChoice {
+    pattern: PatternType,
+    description: String,
+    // Maybe icon/visual indicator
 }

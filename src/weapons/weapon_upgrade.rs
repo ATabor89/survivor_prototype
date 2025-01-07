@@ -11,8 +11,7 @@ pub enum WeaponUpgradeChange {
     Cooldown(i32),
     Duration(i32),
     AddCircle {
-        pattern: PatternType,
-        // offset_angle: f32,
+        pattern: Option<PatternType>,
     },
 }
 
@@ -27,8 +26,8 @@ impl std::fmt::Display for WeaponUpgradeChange {
             WeaponUpgradeChange::Duration(duration) => {
                 write!(f, "Increase duration by {}", duration)
             }
-            WeaponUpgradeChange::AddCircle { pattern, .. } => {
-                write!(f, "Add a {} Magick Circle", pattern)
+            WeaponUpgradeChange::AddCircle { .. } => {
+                write!(f, "Add a new Magick Circle")
             }
         }
     }
@@ -127,7 +126,7 @@ impl WeaponUpgradeConfig {
                 // Level 3: First additional circle
                 WeaponUpgradeSpec {
                     changes: vec![WeaponUpgradeChange::AddCircle {
-                        pattern: PatternType::Banishment,
+                        pattern: None,
                         // offset_angle: std::f32::consts::PI,
                     }],
                 },
@@ -135,7 +134,7 @@ impl WeaponUpgradeConfig {
                 WeaponUpgradeSpec {
                     changes: vec![
                         WeaponUpgradeChange::AddCircle {
-                            pattern: PatternType::Banishment,
+                            pattern: None,
                             // offset_angle: std::f32::consts::PI * 0.5,
                         },
                         WeaponUpgradeChange::Damage(1),
@@ -145,7 +144,7 @@ impl WeaponUpgradeConfig {
                 // Level 5: Third circle
                 WeaponUpgradeSpec {
                     changes: vec![WeaponUpgradeChange::AddCircle {
-                        pattern: PatternType::Banishment,
+                        pattern: None,
                         // offset_angle: std::f32::consts::PI * 1.5,
                     }],
                 },
@@ -153,7 +152,7 @@ impl WeaponUpgradeConfig {
                 WeaponUpgradeSpec {
                     changes: vec![
                         WeaponUpgradeChange::AddCircle {
-                            pattern: PatternType::Banishment,
+                            pattern: None,
                             // offset_angle: std::f32::consts::PI * 2.0,
                         },
                         WeaponUpgradeChange::Damage(2),
@@ -164,7 +163,7 @@ impl WeaponUpgradeConfig {
                 WeaponUpgradeSpec {
                     changes: vec![
                         WeaponUpgradeChange::AddCircle {
-                            pattern: PatternType::Banishment,
+                            pattern: None,
                             // offset_angle: std::f32::consts::PI * 2.5,
                         },
                         WeaponUpgradeChange::Damage(1),
@@ -175,7 +174,7 @@ impl WeaponUpgradeConfig {
                 WeaponUpgradeSpec {
                     changes: vec![
                         WeaponUpgradeChange::AddCircle {
-                            pattern: PatternType::Banishment,
+                            pattern: None,
                             // offset_angle: std::f32::consts::PI * 3.0,
                         },
                         WeaponUpgradeChange::Damage(3),
