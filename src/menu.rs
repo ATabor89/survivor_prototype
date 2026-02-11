@@ -34,6 +34,7 @@ impl Plugin for MenuPlugin {
                     handle_menu_interactions,
                     update_menu_buttons,
                     handle_upgrade_selection_and_confirmation,
+                    handle_pattern_select_menu,
                 )
                     .chain()
                     .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
@@ -226,9 +227,10 @@ pub fn spawn_pattern_select_menu(commands: &mut Commands) {
 
                     // Spawn buttons for each pattern type
                     for (i, pattern) in PatternType::iter().enumerate() {
-                        spawn_menu_button(
+                        spawn_pattern_button(
                             parent,
-                            &format!("{}: {}", pattern, pattern.get_description()),
+                            &pattern.to_string(),
+                            &pattern.get_description(),
                             MenuAction::SelectPattern(pattern),
                             i == 0, // First one selected by default
                         );
@@ -355,6 +357,52 @@ pub fn spawn_menu_button(
         });
 }
 
+// Specialized button for pattern selection - wider with title + description layout
+pub fn spawn_pattern_button(
+    parent: &mut ChildBuilder,
+    title: &str,
+    description: &str,
+    action: MenuAction,
+    selected: bool,
+) {
+    parent
+        .spawn((
+            Button { ..default() },
+            Node {
+                width: Val::Px(500.0),
+                padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+            MenuItem { selected },
+            MenuActionComponent { action },
+        ))
+        .with_children(|parent| {
+            // Pattern name (bold/larger)
+            parent.spawn((
+                Text::new(title),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+            // Description (smaller, dimmer)
+            parent.spawn((
+                Text::new(description),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+            ));
+        });
+}
+
 pub fn spawn_menu_container(
     parent: &mut ChildBuilder,
     spawn_content: impl FnOnce(&mut ChildBuilder),
@@ -400,14 +448,20 @@ pub fn update_menu_buttons(
         };
         background_color.0 = bg_color;
 
-        // Update text color
-        if let Some(&child) = children.first() {
+        // Update text color for all text children
+        let is_highlighted = menu_item.selected || matches!(interaction, Interaction::Hovered);
+        for (i, &child) in children.iter().enumerate() {
             if let Ok((_, mut text_color)) = text_query.get_mut(child) {
-                text_color.0 = if menu_item.selected || matches!(interaction, Interaction::Hovered)
-                {
-                    Color::srgb(1.0, 0.84, 0.0)
+                text_color.0 = if is_highlighted {
+                    if i == 0 {
+                        Color::srgb(1.0, 0.84, 0.0) // Title: gold
+                    } else {
+                        Color::srgb(0.9, 0.75, 0.3) // Description: muted gold
+                    }
+                } else if i == 0 {
+                    Color::WHITE // Title: white
                 } else {
-                    Color::WHITE
+                    Color::srgb(0.7, 0.7, 0.7) // Description: gray
                 };
             }
         }
