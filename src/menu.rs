@@ -26,7 +26,12 @@ impl Plugin for MenuPlugin {
                 )
                     .chain(),
             )
-            // Menu systems
+            // Menu systems — core chain handles navigation, visuals, and upgrade confirmation.
+            // handle_pattern_select_menu is deliberately NOT chained here because Bevy
+            // auto-flushes deferred commands between chained systems. If it were chained
+            // after handle_upgrade_selection_and_confirmation, the pattern select menu
+            // spawned via commands would be immediately visible, and the same Enter
+            // keypress that confirmed the upgrade would also confirm the first pattern.
             .add_systems(
                 Update,
                 (
@@ -34,9 +39,14 @@ impl Plugin for MenuPlugin {
                     handle_menu_interactions,
                     update_menu_buttons,
                     handle_upgrade_selection_and_confirmation,
-                    handle_pattern_select_menu,
                 )
                     .chain()
+                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
+            )
+            .add_systems(
+                Update,
+                handle_pattern_select_menu
+                    .after(handle_upgrade_selection_and_confirmation)
                     .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
             )
             // State transitions
@@ -203,6 +213,7 @@ pub fn spawn_pattern_select_menu(commands: &mut Commands) {
             MenuRoot {
                 menu_type: MenuType::PatternSelect,
             },
+            MenuType::PatternSelect,
         ))
         .with_children(|parent| {
             parent
@@ -469,34 +480,18 @@ pub fn update_menu_buttons(
 }
 
 pub fn handle_menu_interactions(
-    mut buttons: Query<(&Interaction, &mut MenuItem, &MenuActionComponent), With<Button>>,
+    mut buttons: Query<(&Interaction, &MenuItem, &MenuActionComponent), With<Button>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, mut menu_item, action_component) in buttons.iter_mut() {
-        // Only modify selection via mouse if the item isn't already selected via keyboard
-        match *interaction {
-            Interaction::Pressed => {
-                handle_menu_action(&action_component.action, &mut next_state);
-            }
-            Interaction::Hovered => {
-                // Only update selection via hover if not already selected (preserves keyboard selection)
-                if !menu_item.selected {
-                    menu_item.selected = true;
-                }
-            }
-            Interaction::None => {
-                // Only deselect if this was a mouse selection (hover)
-                // This preserves keyboard selection
-                if menu_item.selected && button_was_hovered(interaction) {
-                    menu_item.selected = false;
-                }
-            }
+    for (interaction, _menu_item, action_component) in buttons.iter_mut() {
+        // Only handle click actions here — hover highlighting is handled
+        // by update_menu_buttons via the Interaction component directly.
+        // We deliberately do NOT mutate `selected` on hover, because that
+        // interferes with keyboard navigation in menu_navigation.
+        if *interaction == Interaction::Pressed {
+            handle_menu_action(&action_component.action, &mut next_state);
         }
     }
-}
-
-fn button_was_hovered(interaction: &Interaction) -> bool {
-    matches!(interaction, Interaction::Hovered)
 }
 
 fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>) {
@@ -529,9 +524,10 @@ pub fn handle_upgrade_selection_and_confirmation(
     }
 
     // Check keyboard/mouse selection
+    let enter_pressed = keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space);
+
     for (menu_item, action_component, interaction) in &menu_items {
-        let should_confirm = (menu_item.selected
-            && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
+        let should_confirm = (menu_item.selected && enter_pressed)
             || *interaction == Interaction::Pressed;
 
         if should_confirm {
@@ -607,6 +603,7 @@ pub fn handle_pattern_select_menu(
     mut pending_add_circle: Option<ResMut<PendingAddCircleUpgrade>>,
     mut weapon_upgrade_events: EventWriter<WeaponUpgradeConfirmedEvent>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut was_active_last_frame: Local<bool>,
 ) {
     // Make sure we only do this if the pattern-select menu is up
     let pattern_select_active = menu_query
@@ -614,6 +611,15 @@ pub fn handle_pattern_select_menu(
         .any(|(_, mtype)| *mtype == MenuType::PatternSelect);
 
     if !pattern_select_active {
+        *was_active_last_frame = false;
+        return;
+    }
+
+    // Skip input on the first frame the menu appears. This prevents the
+    // Enter/Space keypress that opened this menu (from the level-up
+    // confirmation) from immediately confirming the first pattern.
+    if !*was_active_last_frame {
+        *was_active_last_frame = true;
         return;
     }
 
