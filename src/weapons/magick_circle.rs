@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use bevy_prototype_lyon::draw::Fill;
 use bevy_prototype_lyon::entity::ShapeBundle;
 use bevy_prototype_lyon::geometry::GeometryBuilder;
-use bevy_prototype_lyon::prelude::RectangleOrigin;
+use bevy_prototype_lyon::prelude::RegularPolygonFeature;
 use bevy_prototype_lyon::shapes;
 use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group, Sensor};
 use strum::IntoEnumIterator;
@@ -45,6 +45,23 @@ impl std::fmt::Display for PatternType {
     }
 }
 
+/// Visual configuration for a pattern type — colors, sigil shape, motion.
+pub struct PatternVisuals {
+    /// RGBA fill color for the circle (the big translucent disc)
+    pub circle_color: Color,
+    /// RGBA fill color for the orbiting sigils
+    pub sigil_color: Color,
+    /// Number of sides for the sigil shape.
+    /// 0 = 6-pointed star (custom polygon), 3+ = regular polygon.
+    pub sigil_sides: u32,
+    /// Orbit speed for sigils (negative = reverse direction)
+    pub orbit_speed: f32,
+    /// Rotation speed for the main circle (negative = reverse)
+    pub rotation_speed: f32,
+    /// Number of sigils orbiting the circle
+    pub num_sigils: u32,
+}
+
 impl PatternType {
     pub fn get_description(&self) -> String {
         match self {
@@ -55,6 +72,57 @@ impl PatternType {
             PatternType::Banishment => "Damages enemies within the circle".to_string(),
             PatternType::Invocation => "Pulls enemies toward the circle's center".to_string(),
             PatternType::Manifestation => "Creates periodic effects within the circle".to_string(),
+        }
+    }
+
+    /// Returns the visual configuration for this pattern type.
+    pub fn visuals(&self) -> PatternVisuals {
+        match self {
+            // Red-orange — fire, destruction, aggressive
+            PatternType::Banishment => PatternVisuals {
+                circle_color: Color::srgba(0.9, 0.2, 0.1, 0.3),
+                sigil_color: Color::srgba(1.0, 0.4, 0.1, 0.8),
+                sigil_sides: 3,   // triangles — sharp, aggressive
+                orbit_speed: 1.5, // fast orbit
+                rotation_speed: 1.5,
+                num_sigils: 4,
+            },
+            // Deep purple — arcane chains, restraint
+            PatternType::Binding => PatternVisuals {
+                circle_color: Color::srgba(0.5, 0.1, 0.7, 0.3),
+                sigil_color: Color::srgba(0.7, 0.3, 1.0, 0.8),
+                sigil_sides: 6,   // hexagons — stable, locking
+                orbit_speed: 0.5, // slow, deliberate
+                rotation_speed: 0.4,
+                num_sigils: 6,    // forming a cage
+            },
+            // Teal/cyan — summoning, otherworldly pull
+            PatternType::Invocation => PatternVisuals {
+                circle_color: Color::srgba(0.1, 0.7, 0.7, 0.3),
+                sigil_color: Color::srgba(0.2, 0.9, 0.8, 0.8),
+                sigil_sides: 5,    // pentagons — summoning geometry
+                orbit_speed: -1.0, // reverse orbit — pulling inward
+                rotation_speed: -0.8,
+                num_sigils: 5,
+            },
+            // Green/lime — growth, creation, periodic effects
+            PatternType::Manifestation => PatternVisuals {
+                circle_color: Color::srgba(0.2, 0.7, 0.1, 0.3),
+                sigil_color: Color::srgba(0.5, 0.9, 0.2, 0.8),
+                sigil_sides: 0,   // 6-pointed star — mystical
+                orbit_speed: 0.8,
+                rotation_speed: 1.2,
+                num_sigils: 3,
+            },
+            // Silver-blue/white — wards, shields, purity
+            PatternType::Protection => PatternVisuals {
+                circle_color: Color::srgba(0.7, 0.8, 1.0, 0.35),
+                sigil_color: Color::srgba(0.9, 0.95, 1.0, 0.85),
+                sigil_sides: 4,   // diamonds — solid, stable
+                orbit_speed: 0.7,
+                rotation_speed: 0.6,
+                num_sigils: 4,
+            },
         }
     }
 }
@@ -101,6 +169,38 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, picku
     });
 }
 
+/// Builds the lyon `Path` for a sigil shape based on the number of sides.
+/// `sides == 0` produces a 6-pointed star; any other value produces a regular polygon.
+fn build_sigil_path(sigil_size: f32, sigil_sides: u32) -> bevy_prototype_lyon::entity::Path {
+    if sigil_sides == 0 {
+        // 6-pointed star: alternating outer and inner vertices
+        let outer_r = sigil_size;
+        let inner_r = sigil_size * 0.5;
+        let points: Vec<Vec2> = (0..12)
+            .map(|i| {
+                let angle =
+                    (i as f32) * std::f32::consts::TAU / 12.0 - std::f32::consts::FRAC_PI_2;
+                let r = if i % 2 == 0 { outer_r } else { inner_r };
+                Vec2::new(angle.cos() * r, angle.sin() * r)
+            })
+            .collect();
+        GeometryBuilder::new()
+            .add(&shapes::Polygon {
+                points,
+                closed: true,
+            })
+            .build()
+    } else {
+        GeometryBuilder::new()
+            .add(&shapes::RegularPolygon {
+                sides: sigil_sides as usize,
+                center: Vec2::ZERO,
+                feature: RegularPolygonFeature::Radius(sigil_size),
+            })
+            .build()
+    }
+}
+
 /// Helper function to spawn a magick circle attack
 pub fn spawn_magick_circle_attack(
     commands: &mut Commands,
@@ -108,7 +208,6 @@ pub fn spawn_magick_circle_attack(
     damage: i32,
     radius: f32,
     pattern_type: PatternType,
-    num_sigils: u32,
     offset_angle: Option<f32>,
 ) -> Entity {
     // Only calculate offset if angle is provided
@@ -124,7 +223,9 @@ pub fn spawn_magick_circle_attack(
         center_pos // No offset for centered circle
     };
 
-    info!("Spawning attack at position: {:?}", spawn_pos);
+    let visuals = pattern_type.visuals();
+
+    info!("Spawning {:?} attack at position: {:?}", pattern_type, spawn_pos);
     // First spawn the attack entity
     let attack_entity = commands
         .spawn((
@@ -133,7 +234,7 @@ pub fn spawn_magick_circle_attack(
                 timer: Timer::from_seconds(3.0, TimerMode::Once),
             },
             Rotates {
-                speed: 1.0,
+                speed: visuals.rotation_speed,
                 current_angle: 0.0,
             },
             Damage { amount: damage },
@@ -153,11 +254,11 @@ pub fn spawn_magick_circle_attack(
                 transform: Transform::from_translation(spawn_pos),
                 ..default()
             },
-            Fill::color(Color::srgba(0.5, 0.5, 1.0, 0.3)),
+            Fill::color(visuals.circle_color),
             Sensor,
             Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
-            CollisionGroups::new(Group::GROUP_3, Group::GROUP_2),
+            CollisionGroups::new(Group::GROUP_3, Group::GROUP_1 | Group::GROUP_2),
             pattern_type,
             WeaponMovement::Stationary,
         ))
@@ -165,7 +266,8 @@ pub fn spawn_magick_circle_attack(
 
     // Then spawn sigils as children of the attack
     let sigil_size = radius * 0.25;
-    for i in 0..num_sigils {
+    let actual_num_sigils = visuals.num_sigils;
+    for i in 0..actual_num_sigils {
         let sigil_entity = commands
             .spawn((
                 Sigil {
@@ -174,21 +276,15 @@ pub fn spawn_magick_circle_attack(
                 },
                 Orbits {
                     radius,
-                    speed: 1.0,
-                    current_angle: (i as f32) * std::f32::consts::TAU / num_sigils as f32,
+                    speed: visuals.orbit_speed,
+                    current_angle: (i as f32) * std::f32::consts::TAU / actual_num_sigils as f32,
                 },
                 ShapeBundle {
-                    path: GeometryBuilder::new()
-                        .add(&shapes::Rectangle {
-                            extents: Vec2::splat(sigil_size),
-                            origin: RectangleOrigin::Center,
-                            ..default()
-                        })
-                        .build(),
+                    path: build_sigil_path(sigil_size, visuals.sigil_sides),
                     transform: Transform::default(),
                     ..default()
                 },
-                Fill::color(Color::srgba(0.7, 0.7, 1.0, 0.8)),
+                Fill::color(visuals.sigil_color),
             ))
             .id();
 

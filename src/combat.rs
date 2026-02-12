@@ -1,5 +1,6 @@
 use crate::components::Health;
 use crate::death::MarkedForDeath;
+use crate::weapons::ProtectionBuff;
 use bevy::prelude::*;
 
 #[derive(Event)]
@@ -45,6 +46,7 @@ pub fn handle_damage(
     mut damage_events: EventReader<DamageEvent>,
     mut health_query: Query<&mut Health>,
     mut cooldown_query: Query<&mut DamageCooldown>,
+    protection_query: Query<&ProtectionBuff>,
 ) {
     for event in damage_events.read() {
         info!(
@@ -79,10 +81,24 @@ pub fn handle_damage(
             continue;
         }
 
+        // Calculate effective damage, accounting for Protection buff
+        let effective_damage = if let Ok(protection) = protection_query.get(event.target) {
+            let reduced = (event.amount as f32 * (1.0 - protection.damage_reduction)) as i32;
+            info!(
+                "Protection buff active: {}% reduction, {} -> {}",
+                (protection.damage_reduction * 100.0) as i32,
+                event.amount,
+                reduced.max(1) // Always deal at least 1 damage
+            );
+            reduced.max(1)
+        } else {
+            event.amount
+        };
+
         // Apply damage
         if let Ok(mut health) = health_query.get_mut(event.target) {
             let old_health = health.current;
-            health.current -= event.amount;
+            health.current -= effective_damage;
             info!(
                 "Health changed from {} to {} for {:?}",
                 old_health, health.current, event.target

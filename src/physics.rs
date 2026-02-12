@@ -137,7 +137,7 @@ pub fn setup_physics_bodies(
                     RigidBody::KinematicPositionBased,
                     Collider::ball(12.0),
                     ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(player_group, enemy_group | experience_group),
+                    CollisionGroups::new(player_group, enemy_group | projectile_group | experience_group),
                     Velocity::zero(),
                     LockedAxes::ROTATION_LOCKED,
                 ))

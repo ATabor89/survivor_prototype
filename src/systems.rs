@@ -4,7 +4,7 @@ use crate::components::{
     Player,
 };
 use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
-use crate::weapons::{BindingEffect, StartingWeapon, WeaponType};
+use crate::weapons::{BindingEffect, InvocationPull, StartingWeapon, WeaponType};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use crate::experience::Experience;
@@ -232,6 +232,7 @@ pub fn enemy_movement(
     player_query: Query<&Transform, With<Player>>,
     mut enemy_query: Query<(Entity, &Transform, &Enemy, &mut Velocity)>,
     binding_query: Query<&BindingEffect>,
+    pull_query: Query<&InvocationPull>,
 ) {
     if let Ok(player_transform) = player_query.get_single() {
         for (entity, transform, enemy, mut velocity) in enemy_query.iter_mut() {
@@ -246,7 +247,21 @@ pub fn enemy_movement(
             };
 
             // Apply movement reduction based on binding strength
-            velocity.linvel = base_velocity * (1.0 - binding_strength);
+            let mut final_velocity = base_velocity * (1.0 - binding_strength);
+
+            // Check if enemy is being pulled by an Invocation circle
+            if let Ok(pull) = pull_query.get(entity) {
+                let enemy_pos = transform.translation.truncate();
+                let to_center = pull.pull_target - enemy_pos;
+                let dist = to_center.length();
+                if dist > 1.0 {
+                    // Pull toward center; override chase velocity
+                    let pull_dir = to_center / dist;
+                    final_velocity = pull_dir * pull.strength;
+                }
+            }
+
+            velocity.linvel = final_velocity;
         }
     }
 }
