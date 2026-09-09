@@ -39,6 +39,8 @@ pub enum DebugAction {
     SpawnTargets { moving: bool },
     Heal,
     GrantLevel,
+    AdvanceWave,
+    TestVictory,
     Resume,
 }
 
@@ -214,6 +216,24 @@ pub fn apply_actions(world: &mut World) {
                     .resource_mut::<NextState<GameState>>()
                     .set(GameState::Playing);
             }
+            DebugAction::AdvanceWave => {
+                let mut stats = world.resource_mut::<crate::resources::GameStats>();
+                if stats.time_elapsed < 540.0 {
+                    stats.time_elapsed =
+                        ((stats.time_elapsed / 60.0).floor() * 60.0 + 60.0).min(540.0);
+                }
+                let wave = crate::waves::wave_index(stats.time_elapsed) + 1;
+                world.resource_mut::<DebugSession>().status =
+                    format!("Wave {wave} starts on resume.");
+            }
+            DebugAction::TestVictory => {
+                world
+                    .resource_mut::<crate::resources::GameStats>()
+                    .time_elapsed = crate::run::SURVIVAL_SECONDS;
+                world
+                    .resource_mut::<NextState<GameState>>()
+                    .set(GameState::Playing);
+            }
             DebugAction::Resume => world
                 .resource_mut::<NextState<GameState>>()
                 .set(GameState::Playing),
@@ -288,6 +308,10 @@ fn panel(
                 if ui.button("Heal player").clicked() { session.actions.push(DebugAction::Heal); }
                 if ui.button("Grant one level").clicked() { session.actions.push(DebugAction::GrantLevel); }
                 if ui.button("Resume").clicked() { session.actions.push(DebugAction::Resume); }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Next wave").clicked() { session.actions.push(DebugAction::AdvanceWave); }
+                if ui.button("Test victory").clicked() { session.actions.push(DebugAction::TestVictory); }
             });
             ui.separator();
             ui.label(format!("Enemies: {}   Active overlap pairs: {}", enemies.iter().count(), overlaps.overlaps.len()));

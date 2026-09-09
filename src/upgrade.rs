@@ -3,7 +3,7 @@ use crate::menu;
 use crate::menu::{
     GenericUpgradeConfirmedEvent, MenuAction, MenuActionComponent, MenuItem, UpgradeChoice,
 };
-use crate::types::{EquipmentType, Rarity, StatType};
+use crate::types::Rarity;
 use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::color::{Alpha, Color};
@@ -31,32 +31,22 @@ pub fn handle_generic_upgrade(
                     health.current = new_health;
                 }
             }
-            GenericUpgrade::ResourcePickup(_) => {
-                // We'll implement this later
-                info!("Resource pickup not yet implemented");
-            }
         }
     }
 }
 
-#[derive(Resource)]
-pub struct UpgradePool {
-    weapons: Vec<(WeaponType, Rarity)>,
-    equipment: Vec<(EquipmentType, Rarity)>,
-    stats: Vec<(StatType, Rarity)>,
-}
+#[derive(Resource, Default)]
+pub struct UpgradePool;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GenericUpgrade {
-    HealthPickup(i32),   // Amount to heal
-    ResourcePickup(u32), // Amount of resource to gain
+    HealthPickup(i32), // Amount to heal
 }
 
 impl std::fmt::Display for GenericUpgrade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GenericUpgrade::HealthPickup(_) => write!(f, "Philosopher's Elixir"),
-            GenericUpgrade::ResourcePickup(_) => write!(f, "Void Shards"),
         }
     }
 }
@@ -67,46 +57,13 @@ pub enum UpgradeType {
     Generic(GenericUpgrade),
 }
 
-impl Default for UpgradePool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl UpgradePool {
-    pub fn new() -> Self {
-        Self {
-            weapons: vec![(WeaponType::MagickCircle, Rarity::Common)],
-            equipment: vec![
-                (EquipmentType::Armor, Rarity::Common),
-                (EquipmentType::Ring, Rarity::Uncommon),
-                (EquipmentType::Amulet, Rarity::Rare),
-                (EquipmentType::Boots, Rarity::Common),
-                (EquipmentType::Gloves, Rarity::Uncommon),
-            ],
-            stats: vec![
-                (StatType::Health, Rarity::Common),
-                (StatType::Speed, Rarity::Common),
-                (StatType::Attack, Rarity::Uncommon),
-                (StatType::Defense, Rarity::Common),
-                (StatType::Luck, Rarity::Rare),
-            ],
-        }
-    }
-
     pub fn generate_generic_choices() -> Vec<UpgradeChoice> {
-        vec![
-            UpgradeChoice {
-                upgrade_type: UpgradeType::Generic(GenericUpgrade::HealthPickup(20)),
-                description: "Restore health with a Philosopher's Elixir".to_string(),
-                rarity: Rarity::Common,
-            },
-            UpgradeChoice {
-                upgrade_type: UpgradeType::Generic(GenericUpgrade::ResourcePickup(100)),
-                description: "Gather Void Shards".to_string(),
-                rarity: Rarity::Common,
-            },
-        ]
+        vec![UpgradeChoice {
+            upgrade_type: UpgradeType::Generic(GenericUpgrade::HealthPickup(20)),
+            description: "Restore up to 20 health with a Philosopher's Elixir".to_string(),
+            rarity: Rarity::Common,
+        }]
     }
 
     pub fn generate_weapon_upgrades(
@@ -116,15 +73,12 @@ impl UpgradePool {
         let mut upgrades = Vec::new();
 
         for weapon_meta in weapons {
-            info!("Processing weapon config from inventory: {:?}", weapon_meta);
-
             // Fetch the next upgrades from your config, using the weapon’s current level
             let specs =
                 weapon_upgrade_config.get_next_upgrades(weapon_meta.weapon_type, weapon_meta.level);
 
             // For logging or reference
             let next_level = weapon_meta.level + 1;
-            info!("Next level: {}", next_level);
 
             // Convert each `WeaponUpgradeSpec` to an `UpgradeChoice`
             for spec in specs {
@@ -137,14 +91,12 @@ impl UpgradePool {
                 let description = format!("Level {next_level}: {changes}");
 
                 upgrades.push(UpgradeChoice {
-                    upgrade_type: UpgradeType::Weapon(weapon_meta.weapon_type, spec.clone()),
+                    upgrade_type: UpgradeType::Weapon(weapon_meta.weapon_type, spec),
                     description,
                     rarity: Rarity::Common, // or more advanced logic
                 });
             }
         }
-
-        info!("Generated weapon upgrades: {:?}", upgrades);
 
         upgrades
     }
@@ -193,20 +145,8 @@ impl UpgradePool {
         }
     }
 
-    fn select_random<T>(pool: &[T], count: usize, rng: &mut impl RngExt) -> Vec<T>
-    where
-        T: Clone,
-    {
-        pool.iter()
-            .sample(rng, count)
-            .into_iter()
-            .cloned()
-            .collect()
-    }
-
     fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl RngExt) -> Vec<T>
     where
-        T: Clone,
         I: IntoIterator<Item = T>,
     {
         iter.into_iter().sample(rng, count)
@@ -222,7 +162,7 @@ pub fn spawn_upgrade_choice(
 
     parent
         .spawn((
-            Button { ..default() },
+            Button,
             BorderColor::all(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
             BackgroundColor(if is_first {
                 Color::srgb(0.3, 0.3, 0.4)
@@ -231,7 +171,7 @@ pub fn spawn_upgrade_choice(
             }),
             Node {
                 width: Val::Percent(100.0),
-                min_height: Val::Px(100.0), // Made taller
+                min_height: Val::Px(100.0),
                 padding: UiRect::all(Val::Px(16.0)),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -250,7 +190,7 @@ pub fn spawn_upgrade_choice(
             parent.spawn((
                 Text::new(icon),
                 TextFont {
-                    font_size: FontSize::Px(32.0), // Made larger
+                    font_size: FontSize::Px(32.0),
                     ..default()
                 },
                 TextColor(menu::get_rarity_color(&choice.rarity)),
@@ -268,7 +208,7 @@ pub fn spawn_upgrade_choice(
                     parent.spawn((
                         Text::new(name),
                         TextFont {
-                            font_size: FontSize::Px(24.0), // Made larger
+                            font_size: FontSize::Px(24.0),
                             ..default()
                         },
                         TextColor(menu::get_rarity_color(&choice.rarity)),
@@ -278,7 +218,7 @@ pub fn spawn_upgrade_choice(
                     parent.spawn((
                         Text::new(description),
                         TextFont {
-                            font_size: FontSize::Px(18.0), // Made larger
+                            font_size: FontSize::Px(18.0),
                             ..default()
                         },
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),
@@ -303,7 +243,6 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
         UpgradeType::Generic(generic_type) => {
             let icon = match generic_type {
                 GenericUpgrade::HealthPickup(_) => "+",
-                GenericUpgrade::ResourcePickup(_) => "*",
             };
             (
                 icon,

@@ -1,8 +1,9 @@
 # Survivors Prototype
 
 An occult-themed 2D survivors prototype built with Bevy 0.19, Rapier, and Lyon.
-The current loop includes enemy waves, experience and leveling, five Magick Circle
-patterns, weapon upgrades, and pause/selection menus.
+Survive ten minutes in a large, enclosed courtyard. Build a weapon from five
+Magick Circle patterns while collecting experience and facing increasingly dense
+waves. Death and victory both lead to a run summary and a fresh-run option.
 
 ## Build and run
 
@@ -30,7 +31,8 @@ cargo run --locked --features dev-tools
 ```
 
 Press **F1 while playing** to pause and edit circle builds, spawn targets, toggle
-invulnerability/natural spawns, or grant a level. Apply the build, then resume with
+invulnerability/natural spawns, grant a level, skip to the next wave, or test the
+victory flow. Apply the build, then resume with
 F1, Escape, or the Resume button. See [composition and playtesting](design/CIRCLE-COMPOSITION.md)
 for effect rules and the available controls.
 
@@ -39,10 +41,23 @@ for effect rules and the available controls.
 - **Up/Down or W/S:** navigate menus.
 - **Enter or Space:** confirm the selected upgrade or pattern.
 - **Mouse click:** select a menu option.
+- **Controller left stick:** move; **D-pad Up/Down:** navigate menus;
+  **South face button** (A/Cross): confirm; **Start:** pause/resume.
 
-The game starts directly in play. A title screen, saves, audio, and game-over and
-victory screens remain unfinished. See [the design document](design/DESIGN.md)
-for the larger game concept.
+The game starts directly in play. The camera follows the player through a
+3,200 × 2,400 courtyard; Rapier walls contain players and enemies. Waves change
+each minute, introducing Runners in minute two and Brutes in minute four.
+Pause, level-up selection, and Circle Lab freeze the run clock.
+
+Choose **Play again** after death or victory to reset the run, including XP,
+weapon upgrades, enemies, gems, and debug overrides. Controller input has automated
+coverage; a physical controller has not been verified. Circle Lab remains a
+keyboard/mouse tool.
+
+The encounter schedule and XP progression are an initial balance pass. A title
+screen, saves, audio, and persistent progression remain future work. See the
+[systems review](design/SYSTEMS-REVIEW.md) for the current architecture, changes,
+and limitations, and [the design document](design/DESIGN.md) for the larger concept.
 
 ## Verification
 
@@ -51,14 +66,16 @@ cargo fmt -- --check
 cargo check --locked
 cargo test --locked
 cargo test --locked --features dev-tools
+cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 
 The tests run the game plugins and Rapier without a window/GPU. They cover
 movement and pause, damage/death and XP pickup, circle effects and cleanup,
 overlap membership and unique combinations, continuous Invocation pull and cleanup,
-Binding expiry, Protection damage reduction, and keyboard/mouse upgrade flows. Rendering and layout also
-need a visual check after engine or UI changes. Some unused prototype scaffolding
-still produces dead-code warnings.
+Binding expiry, Protection damage reduction, keyboard/mouse/controller menu flows,
+physics-backed wall movement, XP collection across pauses, wave progression,
+and run endings/restarts. Rendering and layout also need a visual check after
+engine or UI changes. See the systems review for the final validation record.
 
 ## Migration checkpoints
 

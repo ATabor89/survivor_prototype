@@ -1,8 +1,8 @@
 use crate::menu::WeaponUpgradeConfirmedEvent;
 use crate::weapons::weapon_upgrade::WeaponUpgradeChange;
 use crate::weapons::{
-    Area, AreaEffect, Attack, Damage, Lifetime, Orbits, Rotates, Sigil, WeaponArea, WeaponCooldown,
-    WeaponDamage, WeaponMeta, WeaponMovement, WeaponType,
+    AreaEffect, Attack, Damage, Lifetime, Orbits, Sigil, WeaponArea, WeaponCooldown, WeaponDamage,
+    WeaponMeta, WeaponType,
 };
 use bevy::color::Color;
 use bevy::log::info;
@@ -21,7 +21,6 @@ use strum::EnumIter;
 #[derive(Component)]
 pub struct MagickCircle {
     pub patterns: Vec<PatternType>,
-    pub num_sigils: u32,
 }
 
 #[derive(Component)]
@@ -48,11 +47,11 @@ pub fn animate_manifestation_charge(
 
 #[derive(Component, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 pub enum PatternType {
-    Banishment,    // Damages/pushes enemies
-    Binding,       // Slows/holds enemies
-    Invocation,    // Attracts/pulls enemies
-    Manifestation, // Creates effects over time
-    Protection,    // Basic defensive circle
+    Banishment,
+    Binding,
+    Invocation,
+    Manifestation,
+    Protection,
 }
 
 impl std::fmt::Display for PatternType {
@@ -78,8 +77,6 @@ pub struct PatternVisuals {
     pub sigil_sides: u32,
     /// Orbit speed for sigils (negative = reverse direction)
     pub orbit_speed: f32,
-    /// Rotation speed for the main circle (negative = reverse)
-    pub rotation_speed: f32,
     /// Number of sigils orbiting the circle
     pub num_sigils: u32,
 }
@@ -108,7 +105,6 @@ impl PatternType {
                 sigil_color: Color::srgba(1.0, 0.4, 0.1, 0.8),
                 sigil_sides: 3,   // triangles — sharp, aggressive
                 orbit_speed: 1.5, // fast orbit
-                rotation_speed: 1.5,
                 num_sigils: 4,
             },
             // Deep purple — arcane chains, restraint
@@ -117,8 +113,7 @@ impl PatternType {
                 sigil_color: Color::srgba(0.7, 0.3, 1.0, 0.8),
                 sigil_sides: 6,   // hexagons — stable, locking
                 orbit_speed: 0.5, // slow, deliberate
-                rotation_speed: 0.4,
-                num_sigils: 6, // forming a cage
+                num_sigils: 6,    // forming a cage
             },
             // Teal/cyan — summoning, otherworldly pull
             PatternType::Invocation => PatternVisuals {
@@ -126,7 +121,6 @@ impl PatternType {
                 sigil_color: Color::srgba(0.2, 0.9, 0.8, 0.8),
                 sigil_sides: 5,    // pentagons — summoning geometry
                 orbit_speed: -1.0, // reverse orbit — pulling inward
-                rotation_speed: -0.8,
                 num_sigils: 5,
             },
             // Green/lime — growth, creation, periodic effects
@@ -135,7 +129,6 @@ impl PatternType {
                 sigil_color: Color::srgba(0.5, 0.9, 0.2, 0.8),
                 sigil_sides: 0, // 6-pointed star — mystical
                 orbit_speed: 0.8,
-                rotation_speed: 1.2,
                 num_sigils: 3,
             },
             // Silver-blue/white — wards, shields, purity
@@ -144,7 +137,6 @@ impl PatternType {
                 sigil_color: Color::srgba(0.9, 0.95, 1.0, 0.85),
                 sigil_sides: 4, // diamonds — solid, stable
                 orbit_speed: 0.7,
-                rotation_speed: 0.6,
                 num_sigils: 4,
             },
         }
@@ -152,7 +144,7 @@ impl PatternType {
 }
 
 /// Spawns a magick circle weapon with default configuration
-pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, pickup_id: u8) {
+pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity) {
     info!("Spawning magick circle for player: {:?}", player_entity);
     commands.entity(player_entity).with_children(|parent| {
         // Spawn the base weapon entity
@@ -161,7 +153,6 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, picku
             WeaponMeta {
                 weapon_type: WeaponType::MagickCircle,
                 level: 1,
-                pickup_id,
             },
             WeaponCooldown {
                 timer: Timer::from_seconds(3.5, TimerMode::Repeating),
@@ -179,11 +170,7 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, picku
             // MagickCircle specific components
             MagickCircle {
                 patterns: vec![PatternType::Banishment],
-                num_sigils: 4,
             },
-            // Optional modifiers
-            // Could add other modifiers like PiercingAttack or Knockback
-            // based on configuration
         ));
     });
 }
@@ -245,7 +232,7 @@ pub fn spawn_magick_circle_attack(
 
     let visuals = pattern_type.visuals();
 
-    info!(
+    debug!(
         "Spawning {:?} attack at position: {:?}",
         pattern_type, spawn_pos
     );
@@ -256,12 +243,7 @@ pub fn spawn_magick_circle_attack(
             Lifetime {
                 timer: Timer::from_seconds(3.0, TimerMode::Once),
             },
-            Rotates {
-                speed: visuals.rotation_speed,
-                current_angle: 0.0,
-            },
             Damage { amount: damage },
-            Area { radius },
             AreaEffect::new(pattern_type),
             ShapeBuilder::with(&shapes::Circle {
                 radius,
@@ -277,7 +259,6 @@ pub fn spawn_magick_circle_attack(
             ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
             CollisionGroups::new(Group::GROUP_3, Group::GROUP_1 | Group::GROUP_2),
             pattern_type,
-            WeaponMovement::Stationary,
         ))
         .id();
 
@@ -302,10 +283,7 @@ pub fn spawn_magick_circle_attack(
     for i in 0..actual_num_sigils {
         let sigil_entity = commands
             .spawn((
-                Sigil {
-                    index: i,
-                    base_size: sigil_size,
-                },
+                Sigil,
                 Orbits {
                     radius,
                     speed: visuals.orbit_speed,
@@ -326,28 +304,18 @@ pub fn apply_magick_circle_weapon_upgrades(
     mut weapon_query: Query<(&mut MagickCircle, &WeaponMeta)>,
 ) {
     for upgrade_event in upgrade_events.read() {
-        // We already have the final `upgrade_spec` in `upgrade_event`
         for (mut circle, meta) in weapon_query.iter_mut() {
             if meta.weapon_type == upgrade_event.weapon_type {
                 for change in &upgrade_event.upgrade_spec.changes {
-                    match &change {
-                        WeaponUpgradeChange::AddCircle { pattern } => {
-                            info!(
-                                "Adding new Magick Circle pattern: {:?} at level {}",
-                                pattern, meta.level
-                            );
-                            circle.patterns.push(pattern.expect("Unable to add new Magick Circle pattern; upgrade event's pattern was `None`"));
-                        }
-                        _ => (),
+                    if let WeaponUpgradeChange::AddCircle { pattern } = change {
+                        info!(
+                            "Adding new Magick Circle pattern: {:?} at level {}",
+                            pattern, meta.level
+                        );
+                        circle.patterns.push(pattern.expect("Unable to add new Magick Circle pattern; upgrade event's pattern was `None`"));
                     }
                 }
             }
         }
     }
-}
-
-pub struct PatternChoice {
-    pattern: PatternType,
-    description: String,
-    // Maybe icon/visual indicator
 }

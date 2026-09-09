@@ -33,9 +33,7 @@ impl Plugin for WeaponPlugin {
         app.init_resource::<WeaponUpgradeConfig>()
             .init_resource::<EnemyCircleHits>()
             .init_resource::<ActiveOverlaps>()
-            .insert_resource(WeaponPickupCounter(0))
             .add_message::<AddWeaponEvent>()
-            .add_message::<AreaEffectEvent>()
             .add_message::<BindingEvent>()
             .add_systems(
                 Update,
@@ -55,7 +53,6 @@ impl Plugin for WeaponPlugin {
                     setup_player_inventory,
                     handle_new_weapons,
                     weapon_firing_system,
-                    update_weapon_positions,
                     invocation_cleanup_system,
                     area_effect_system,
                     magick_circle::animate_manifestation_charge,
@@ -64,7 +61,6 @@ impl Plugin for WeaponPlugin {
                     binding_expiration_system,
                     protection_system,
                     attack_lifetime_system,
-                    attack_rotation_system,
                     orbital_movement_system,
                 )
                     .chain()
@@ -79,11 +75,7 @@ impl Plugin for WeaponPlugin {
 pub struct WeaponMeta {
     pub weapon_type: WeaponType,
     pub level: u32,
-    pub pickup_id: u8,
 }
-
-#[derive(Resource)]
-pub struct WeaponPickupCounter(u8);
 
 // Component to define what weapon a player starts with
 #[derive(Component)]
@@ -94,15 +86,6 @@ pub struct StartingWeapon(pub WeaponType);
 pub struct AddWeaponEvent {
     pub player: Entity,
     pub weapon_type: WeaponType,
-}
-
-// Different types of area effects
-#[derive(Message)]
-pub enum AreaEffectEvent {
-    Damage(DamageEvent),
-    Binding(BindingEvent),
-    // Protection(ProtectionEvent),
-    // etc.
 }
 
 #[derive(Message)]
@@ -126,16 +109,9 @@ pub fn setup_player_inventory(
 }
 
 // This system only runs when new weapons are added
-pub fn handle_new_weapons(
-    mut commands: Commands,
-    mut events: MessageReader<AddWeaponEvent>,
-    mut weapon_pickup_counter: ResMut<WeaponPickupCounter>,
-) {
+pub fn handle_new_weapons(mut commands: Commands, mut events: MessageReader<AddWeaponEvent>) {
     for event in events.read() {
-        let pickup_id = weapon_pickup_counter.0;
-        spawn_weapon(&mut commands, event.player, event.weapon_type, pickup_id);
-
-        weapon_pickup_counter.0 += 1;
+        spawn_weapon(&mut commands, event.player, event.weapon_type);
     }
 }
 
@@ -171,16 +147,15 @@ impl Default for WeaponCooldown {
     }
 }
 
-#[derive(Component)]
-pub enum WeaponMovement {
-    /// Weapon stays at spawn location
-    Stationary,
-    /// Weapon follows player position
-    FollowPlayer,
-    // Could add more variants like:
-    // OrbitalRotation(f32), // Rotates around player at given radius
-    // ReturnToPlayer,       // Boomerang-style
-    // LeashToPlayer(f32),   // Follows but with max distance
+impl WeaponCooldown {
+    /// Limit breaks may exceed 100% reduction, but firing always has a cadence.
+    pub const MIN_SECONDS: f32 = 0.1;
+
+    fn effective_seconds(&self, player_reduction: f32) -> f32 {
+        let weapon_factor = ((100.0 + self.cooldown_bonus as f32) / 100.0).max(0.0);
+        (self.base_duration * weapon_factor * (1.0 - player_reduction.clamp(0.0, 1.0)))
+            .max(Self::MIN_SECONDS)
+    }
 }
 
 #[derive(Component)]
@@ -200,11 +175,6 @@ pub struct WeaponArea {
     pub area_bonus: i32, // Positive numbers increase area
 }
 
-#[derive(Component)]
-pub struct Area {
-    pub radius: f32,
-}
-
 /// Attack-specific components
 #[derive(Component)]
 pub struct Attack; // Formerly held an AttackType enum
@@ -215,28 +185,13 @@ pub struct Lifetime {
 }
 
 #[derive(Component)]
-pub struct Rotates {
-    pub speed: f32,
-    pub current_angle: f32,
-}
-
-#[derive(Component)]
-pub struct Sigil {
-    pub index: u32,
-    pub base_size: f32,
-}
+pub struct Sigil;
 
 #[derive(Component)]
 pub struct Orbits {
     pub radius: f32,
     pub speed: f32,
     pub current_angle: f32,
-}
-
-/// Optional weapon modifiers
-#[derive(Component)]
-pub struct PiercingAttack {
-    pub pierce_count: u32,
 }
 
 #[derive(Component)]
@@ -253,20 +208,10 @@ impl AreaEffect {
     }
 }
 
-#[derive(Component)]
-pub struct Knockback {
-    pub force: f32,
-}
-
 /// Spawns a weapon for the player based on weapon type
-pub fn spawn_weapon(
-    commands: &mut Commands,
-    player_entity: Entity,
-    weapon_type: WeaponType,
-    pickup_id: u8,
-) {
+pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType) {
     match weapon_type {
-        WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity, pickup_id),
+        WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity),
         // Add other weapon types here
     }
 }
@@ -278,7 +223,6 @@ pub fn weapon_firing_system(
     // Query player stats
     player_query: Query<
         (
-            Entity,
             &CooldownReduction,
             &DamageMultiplier,
             &AreaMultiplier,
@@ -298,74 +242,49 @@ pub fn weapon_firing_system(
     // Query specific weapon types for their unique properties
     magick_circle_query: Query<&MagickCircle>,
 ) {
-    // info!("Checking weapons - found {} weapons", weapon_query.iter().count());
-
     for (weapon_entity, parent, mut cooldown, damage, area, weapon) in weapon_query.iter_mut() {
-        // info!("Processing weapon: {:?}", weapon_entity);
-
-        if let Ok((
-            _player_entity,
-            cooldown_reduction,
-            damage_multiplier,
-            area_multiplier,
-            player_transform,
-        )) = player_query.get(parent.parent())
+        if let Ok((cooldown_reduction, damage_multiplier, area_multiplier, player_transform)) =
+            player_query.get(parent.parent())
         {
-            // info!("Found player stats - CD reduction: {}, damage mult: {}, area mult: {}",
-            //     cooldown_reduction.percent,
-            //     damage_multiplier.factor,
-            //     area_multiplier.factor
-            // );
-
-            let cooldown_percent = (100 + cooldown.cooldown_bonus) as f32 / 100.0;
-            let effective_cooldown =
-                cooldown.base_duration * cooldown_percent * (1.0 - cooldown_reduction.percent); // Player's cooldown reduction
+            let effective_cooldown = cooldown.effective_seconds(cooldown_reduction.percent);
 
             cooldown
                 .timer
                 .set_duration(Duration::from_secs_f32(effective_cooldown));
             cooldown.timer.tick(time.delta());
 
-            let damage_percent = (100 + damage.damage_bonus) as f32 / 100.0;
+            let damage_percent = ((100.0 + damage.damage_bonus as f32) / 100.0).max(0.0);
             let effective_damage =
-                (damage.base_amount as f32 * damage_percent * damage_multiplier.factor).floor()
-                    as i32;
+                (damage.base_amount as f32 * damage_percent * damage_multiplier.factor.max(0.0))
+                    .max(0.0)
+                    .floor() as i32;
 
-            let area_percent = (100 + area.area_bonus) as f32 / 100.0;
-            let effective_radius = area.base_radius * area_percent * area_multiplier.factor;
-
-            // info!("Timer progress: {}/{}",
-            //     cooldown.timer.elapsed_secs(),
-            //     cooldown.timer.duration().as_secs_f32()
-            // );
+            let area_percent = ((100.0 + area.area_bonus as f32) / 100.0).max(0.0);
+            let effective_radius =
+                (area.base_radius * area_percent * area_multiplier.factor.max(0.0)).max(0.0);
 
             if cooldown.timer.just_finished() {
-                info!(
-                    "Timer finished! Current time: {}, Duration: {}",
-                    time.elapsed_secs(),
-                    cooldown.timer.duration().as_secs_f32()
-                );
-                // info!("Cooldown finished!");
                 match weapon.weapon_type {
                     WeaponType::MagickCircle => {
-                        // info!("Attempting to spawn MagickCircle attack");
                         if let Ok(magick_circle) = magick_circle_query.get(weapon_entity) {
+                            let Some((&first, remaining)) = magick_circle.patterns.split_first()
+                            else {
+                                continue;
+                            };
                             // First circle always spawns centered
                             spawn_magick_circle_attack(
                                 &mut commands,
                                 player_transform.translation,
                                 effective_damage,
                                 effective_radius,
-                                magick_circle.patterns[0],
+                                first,
                                 None, // No offset for first circle
                             );
 
-                            // info!("Spawning MagickCircle attack at position: {:?}", player_transform.translation);
                             // Additional circles are evenly spaced
-                            if magick_circle.patterns.len() > 1 {
-                                let angle_step = std::f32::consts::TAU
-                                    / (magick_circle.patterns.len() - 1) as f32;
-                                for (i, pattern) in magick_circle.patterns[1..].iter().enumerate() {
+                            if !remaining.is_empty() {
+                                let angle_step = std::f32::consts::TAU / remaining.len() as f32;
+                                for (i, pattern) in remaining.iter().enumerate() {
                                     let angle = angle_step * i as f32;
                                     spawn_magick_circle_attack(
                                         &mut commands,
@@ -378,37 +297,13 @@ pub fn weapon_firing_system(
                                 }
                             }
                         } else {
-                            info!("Failed to get MagickCircle component from weapon entity");
+                            warn!("Missing MagickCircle component on weapon {weapon_entity:?}");
                         }
                     }
                 }
             }
         } else {
-            info!("Failed to get player stats for weapon: {:?}", weapon_entity);
-        }
-    }
-}
-
-fn update_weapon_positions(
-    mut param_set: ParamSet<(
-        Query<(&mut Transform, &WeaponMovement), With<Attack>>,
-        Query<&Transform, With<Player>>,
-    )>,
-) {
-    // First get the player position
-    let player_pos = if let Ok(player_transform) = param_set.p1().single() {
-        player_transform.translation
-    } else {
-        return;
-    };
-
-    // Then update weapon positions
-    for (mut weapon_transform, movement) in &mut param_set.p0() {
-        match movement {
-            WeaponMovement::Stationary => (), // Do nothing
-            WeaponMovement::FollowPlayer => {
-                weapon_transform.translation = player_pos;
-            }
+            warn!("Missing player stats for weapon {weapon_entity:?}");
         }
     }
 }
@@ -416,18 +311,15 @@ fn update_weapon_positions(
 /// System to manage area effects for weapons that have them.
 /// Populates `EnemyCircleHits` as a side effect so `overlap_detection_system`
 /// can identify enemies inside multiple circles.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Bevy injects separate queries, messages, and resources to track ECS access."
+)]
 pub fn area_effect_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
     mut effect_query: Query<
-        (
-            Entity,
-            &mut AreaEffect,
-            &Damage,
-            &Area,
-            &PatternType,
-            &Transform,
-        ),
+        (Entity, &mut AreaEffect, &Damage, &PatternType, &Transform),
         With<Attack>,
     >,
     mut damage_events: MessageWriter<DamageEvent>,
@@ -445,8 +337,7 @@ pub fn area_effect_system(
     let mut ticking_circles: HashMap<Entity, u32> = HashMap::default();
 
     // First pass: collect all circle effects affecting each enemy
-    for (circle_entity, mut area_effect, _, _, pattern, circle_transform) in effect_query.iter_mut()
-    {
+    for (circle_entity, mut area_effect, _, pattern, circle_transform) in effect_query.iter_mut() {
         area_effect.timer.tick(time.delta());
         let ticks = area_effect.timer.times_finished_this_tick();
         if ticks > 0 {
@@ -503,11 +394,11 @@ pub fn area_effect_system(
             };
             match pattern.effect() {
                 CircleEffect::Damage { multiplier, .. } => {
-                    if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {
+                    if let Ok((_, _, damage, _, _)) = effect_query.get(*circle_entity) {
                         damage_events.write(DamageEvent {
                             target: *enemy_entity,
-                            amount: (damage.amount as f32 * multiplier).round() as i32
-                                * ticks as i32,
+                            amount: ((damage.amount as f32 * multiplier).round() as i32)
+                                .saturating_mul(i32::try_from(ticks).unwrap_or(i32::MAX)),
                             source: Some(*circle_entity),
                         });
                     }
@@ -664,6 +555,10 @@ pub fn protection_system(
 }
 
 /// Handles lifetime of attacks and marks them for death when expired
+#[expect(
+    clippy::type_complexity,
+    reason = "The Bevy query filters expired attacks without revisiting entities already marked for death."
+)]
 pub fn attack_lifetime_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
@@ -680,29 +575,13 @@ pub fn attack_lifetime_system(
     }
 }
 
-/// Updates rotation for rotating attacks
-pub fn attack_rotation_system(time: Res<Time<Virtual>>, mut query: Query<&mut Rotates>) {
-    for mut rotates in query.iter_mut() {
-        rotates.current_angle += rotates.speed * time.delta_secs();
-
-        // Normalize angle to prevent potential float overflow in very long sessions
-        if rotates.current_angle > std::f32::consts::TAU {
-            rotates.current_angle -= std::f32::consts::TAU;
-        }
-    }
-}
-
 fn orbital_movement_system(
     time: Res<Time<Virtual>>,
     mut query: Query<(&mut Transform, &mut Orbits)>,
 ) {
     for (mut transform, mut orbits) in &mut query {
-        orbits.current_angle += orbits.speed * time.delta_secs();
-
-        // Normalize angle
-        if orbits.current_angle > std::f32::consts::TAU {
-            orbits.current_angle -= std::f32::consts::TAU;
-        }
+        orbits.current_angle = (orbits.current_angle + orbits.speed * time.delta_secs())
+            .rem_euclid(std::f32::consts::TAU);
 
         let offset = Vec2::new(
             orbits.current_angle.cos() * orbits.radius,

@@ -1,3 +1,4 @@
+mod arena;
 mod combat;
 mod components;
 mod death;
@@ -8,14 +9,24 @@ mod experience;
 mod menu;
 mod physics;
 mod resources;
+mod run;
 mod systems;
 mod types;
 mod ui;
 mod upgrade;
+mod waves;
 mod weapons;
 
 #[cfg(test)]
+mod menu_regression_tests;
+#[cfg(test)]
+mod physics_regression_tests;
+#[cfg(test)]
+mod run_regression_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod weapon_regression_tests;
 
 use crate::combat::{handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
@@ -26,7 +37,7 @@ use crate::physics::PhysicsPlugin;
 use crate::resources::{GameState, GameStats, SpawnTimer, WaveConfig};
 use crate::systems::{
     enemy_movement, gameplay_movement_system, handle_pause_state, load_textures, quit_game,
-    spawn_enemies, spawn_player, universal_input_system,
+    spawn_player, universal_input_system,
 };
 use crate::ui::{cleanup_ui, spawn_ui, update_game_timer, update_health_ui, update_kill_counter};
 use crate::upgrade::handle_generic_upgrade;
@@ -44,6 +55,8 @@ enum GameplaySets {
     Weapons,
     Movement,
     Combat,
+    Experience,
+    Progress,
     Spawning,
     Physics,
     Cleanup,
@@ -73,6 +86,7 @@ impl Plugin for SurvivorsGamePlugin {
             .add_plugins(PhysicsPlugin)
             .add_plugins(ExperiencePlugin)
             .add_plugins(WeaponPlugin)
+            .add_plugins((arena::ArenaPlugin, run::RunPlugin, waves::WavesPlugin))
             // Startup systems
             .add_systems(Startup, (load_textures, spawn_player.after(load_textures)))
             // Configure system sets
@@ -85,6 +99,8 @@ impl Plugin for SurvivorsGamePlugin {
                     GameplaySets::Weapons,
                     GameplaySets::Movement,
                     GameplaySets::Combat,
+                    GameplaySets::Experience,
+                    GameplaySets::Progress,
                     GameplaySets::Spawning,
                     GameplaySets::Cleanup,
                 )
@@ -117,16 +133,9 @@ impl Plugin for SurvivorsGamePlugin {
                     (gameplay_movement_system, enemy_movement)
                         .in_set(GameplaySets::Movement)
                         .run_if(in_state(GameState::Playing)),
-                    // Spawning
-                    spawn_enemies
-                        .in_set(GameplaySets::Spawning)
-                        .run_if(in_state(GameState::Playing)),
                 ),
             )
-            .add_systems(
-                Update,
-                handle_generic_upgrade.run_if(in_state(GameState::Playing)),
-            )
+            .add_systems(Update, handle_generic_upgrade)
             // UI-related systems
             .add_systems(
                 OnEnter(GameState::Playing),
@@ -135,7 +144,12 @@ impl Plugin for SurvivorsGamePlugin {
             .add_systems(OnExit(GameState::Playing), cleanup_ui)
             .add_systems(
                 Update,
-                (update_health_ui, update_game_timer, update_kill_counter)
+                (
+                    update_health_ui,
+                    update_game_timer,
+                    update_kill_counter,
+                    ui::update_run_status,
+                )
                     .in_set(GameplaySets::UI)
                     .run_if(in_state(GameState::Playing)),
             )

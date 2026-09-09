@@ -39,6 +39,13 @@ impl PatternPair {
 /// One physical circle pair. Multiple circle pairs may share a pattern combination.
 #[derive(Debug, Clone)]
 pub struct OverlapInfo {
+    #[cfg_attr(
+        all(not(test), not(debug_assertions)),
+        expect(
+            dead_code,
+            reason = "Pattern identities support debug overlap diagnostics and regression tests."
+        )
+    )]
     pub patterns: PatternPair,
     /// Enemy entities that are inside BOTH circles of this pair.
     pub enemies_in_overlap: HashSet<Entity>,
@@ -46,12 +53,13 @@ pub struct OverlapInfo {
 
 /// Frame-scoped resource rebuilt every tick by `overlap_detection_system`.
 /// Contains all active overlaps (circle pairs that share at least one enemy).
-/// Future combo effect systems read from this.
+/// Circle Lab reads this for overlap diagnostics; effects compose independently.
 #[derive(Resource, Debug, Default)]
 pub struct ActiveOverlaps {
     pub overlaps: HashMap<CirclePair, OverlapInfo>,
 }
 
+#[cfg(test)]
 impl ActiveOverlaps {
     /// Returns distinct combinations affecting an enemy, in stable pattern order.
     pub fn patterns_for_enemy(&self, enemy: Entity) -> Vec<PatternPair> {
@@ -81,8 +89,22 @@ impl ActiveOverlaps {
 pub struct OverlappingPatterns {
     /// Distinct unordered pattern combinations, in stable pattern order.
     /// Physical circle multiplicity remains available in `ActiveOverlaps`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained per-enemy overlap diagnostics, verified by regression tests."
+        )
+    )]
     pub pattern_pairs: Vec<PatternPair>,
     /// The circle entities affecting this enemy.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained per-enemy overlap diagnostics, verified by regression tests."
+        )
+    )]
     pub circle_entities: Vec<Entity>,
 }
 
@@ -159,7 +181,7 @@ pub fn overlap_detection_system(
     // Log detected overlaps in debug builds
     #[cfg(debug_assertions)]
     if !active_overlaps.overlaps.is_empty() {
-        for (_pair, info) in active_overlaps.overlaps.iter() {
+        for info in active_overlaps.overlaps.values() {
             debug!(
                 "Overlap detected: {:?} affecting {} enemies",
                 info.patterns,

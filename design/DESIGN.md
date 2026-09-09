@@ -1,8 +1,14 @@
 # Survivors Prototype - Design Document
 
-> **Last Updated:** 2026-09-08 (dependency migration; game design remains provisional)
-> **Branch:** `magick_circle_pattern_select` (dependency upgrade merged)
+> **Implementation summary updated:** 2026-09-09 (survival-run baseline; game design remains provisional)
+> **Branch:** `codex/survival-run`
 > **Engine:** Bevy 0.19.1 (Rust 1.95+, tested with 1.96)
+
+**Current implementation:** Read [the systems review](SYSTEMS-REVIEW.md) for the
+map, waves, run lifecycle, refactors, and validation, and [circle composition](CIRCLE-COMPOSITION.md)
+for effect rules. The status table below is current. Later sections retain older
+implementation descriptions and long-term proposals; their wave counts, UI details,
+and unused-framework references are historical snapshots, not the current code contract.
 
 ---
 
@@ -55,18 +61,21 @@ An occult-themed survivors-like game inspired by Vampire Survivors and HoloCure,
 
 | System | Status | Notes |
 |--------|--------|-------|
-| Player movement (WASD) | Done | 150 base speed |
-| Enemy spawning (waves) | Done | 20 per wave, 2s interval |
+| Player movement | Done | WASD / controller left stick; 150 base speed; Rapier character controller |
+| Courtyard map | Done | 3,200 × 2,400 bounded arena with following camera and Rapier walls |
+| Enemy spawning (waves) | Done | Ten minute-based waves; Acolytes, Runners, Brutes; provisional tuning |
 | Magick Circle weapon | Done | 5 pattern types, orbiting sigils |
 | Pattern selection menu | Done | Choose pattern on circle add |
-| Level-up upgrade menu | Done | 3-4 choices, keyboard + mouse nav |
+| Level-up upgrade menu | Done | Implemented choices only; keyboard, mouse, and D-pad navigation |
 | Pause menu | Done | Resume / Quit |
+| Run ending / restart | Done | Ten-minute survival victory or death; summary and Play again / Quit |
 | Experience / leveling | Done | Orb pickups, exponential scaling |
 | Health / damage | Done | Cooldown-based, protection buff |
 | Physics (Rapier2D) | Done | Collision groups, sensors |
 | HUD (health, timer, kills) | Done | Health bar, game timer, kill count |
 | Circle composition | Done | Independent effects, deterministic stacking, overlap diagnostics; tuning remains provisional |
 | Weapon upgrade progression | Done | 8 levels + limit breaks |
+| Circle Lab | Done | Optional build/encounter controls, next-wave and victory shortcuts |
 
 ### What Does Not Exist Yet
 
@@ -75,10 +84,10 @@ An occult-themed survivors-like game inspired by Vampire Survivors and HoloCure,
 - Sound / music
 - Multiple weapon types (only Magick Circle)
 - Equipment / item system
-- Stat upgrades (framework exists, no implementations)
+- Standalone player-stat upgrades and equipment progression
 - Hub world / village
 - Expedition system
-- Multiple enemy types (only basic chasers)
+- Enemy behaviors beyond pursuit and stat variants
 - Boss encounters
 - Persistent progression / save system
 - Any magical tradition beyond Circle Magick
@@ -534,4 +543,6 @@ assets/
 
 ---
 
-*This document reflects the state of the codebase as of the last update date. The "Planned Systems" section is aspirational and subject to change as development progresses.*
+*This document preserves the broader design and historical implementation notes.
+The current status table and linked systems review supersede older implementation
+details below it. Planned systems remain aspirational and subject to change.*

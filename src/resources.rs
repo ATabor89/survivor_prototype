@@ -11,24 +11,15 @@ pub enum GameState {
     #[cfg(feature = "dev-tools")]
     DebugTools,
     GameOver,
+    Victory,
+    Restarting,
     Quit,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct GameStats {
     pub enemies_killed: u32,
     pub time_elapsed: f32,
-    pub victory_threshold: u32,
-}
-
-impl Default for GameStats {
-    fn default() -> Self {
-        Self {
-            enemies_killed: 0,
-            time_elapsed: 0.0,
-            victory_threshold: 200,
-        }
-    }
 }
 
 #[derive(Resource)]
@@ -60,8 +51,6 @@ impl Default for WaveConfig {
 pub struct GameTextures {
     pub player: Handle<Image>,
     pub enemies: Handle<Image>,
-    pub projectiles: Handle<Image>,
     pub player_layout: Handle<TextureAtlasLayout>,
     pub enemies_layout: Handle<TextureAtlasLayout>,
-    pub projectiles_layout: Handle<TextureAtlasLayout>,
 }

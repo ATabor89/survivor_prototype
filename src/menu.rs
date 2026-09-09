@@ -1,12 +1,12 @@
 use crate::components::{Luck, Player};
-use crate::death::MarkedForDespawn;
-use crate::resources::GameState;
+use crate::resources::{GameState, GameStats};
 use crate::types::Rarity;
 use crate::upgrade;
 use crate::upgrade::{GenericUpgrade, UpgradePool, UpgradeType};
 use crate::weapons::magick_circle::PatternType;
 use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use strum::IntoEnumIterator;
@@ -17,43 +17,24 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WeaponUpgradeConfirmedEvent>()
-            .configure_sets(
+            .add_message::<MenuActivation>()
+            .add_systems(
                 Update,
                 (
-                    MenuSystemSet::Navigation,
-                    MenuSystemSet::Selection,
-                    MenuSystemSet::Confirmation,
+                    collect_menu_activation,
+                    dispatch_menu_action,
+                    update_menu_buttons,
                 )
                     .chain(),
             )
-            // Menu systems — core chain handles navigation, visuals, and upgrade confirmation.
-            // handle_pattern_select_menu is deliberately NOT chained here because Bevy
-            // auto-flushes deferred commands between chained systems. If it were chained
-            // after handle_upgrade_selection_and_confirmation, the pattern select menu
-            // spawned via commands would be immediately visible, and the same Enter
-            // keypress that confirmed the upgrade would also confirm the first pattern.
-            .add_systems(
-                Update,
-                (
-                    menu_navigation,
-                    handle_menu_interactions,
-                    update_menu_buttons,
-                    handle_upgrade_selection_and_confirmation,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
-            )
-            .add_systems(
-                Update,
-                handle_pattern_select_menu
-                    .after(handle_upgrade_selection_and_confirmation)
-                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
-            )
-            // State transitions
             .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
             .add_systems(OnExit(GameState::Paused), cleanup_menu_state)
             .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
-            .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state);
+            .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state)
+            .add_systems(OnEnter(GameState::GameOver), spawn_game_over_menu)
+            .add_systems(OnExit(GameState::GameOver), cleanup_menu_state)
+            .add_systems(OnEnter(GameState::Victory), spawn_victory_menu)
+            .add_systems(OnExit(GameState::Victory), cleanup_menu_state);
     }
 }
 
@@ -73,18 +54,19 @@ pub struct MenuActionComponent {
     pub action: MenuAction,
 }
 
-#[derive(Component, Debug, Eq, PartialEq)]
+#[derive(Component, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MenuType {
-    Main,
     Pause,
     LevelUp,
     PatternSelect,
+    GameOver,
+    Victory,
 }
 
 // Simplified menu actions
 #[derive(Clone)]
 pub enum MenuAction {
-    StartGame,
+    RestartRun,
     ResumeGame,
     QuitGame,
     SelectUpgrade(UpgradeChoice),
@@ -110,13 +92,6 @@ pub struct GenericUpgradeConfirmedEvent {
     pub generic_upgrade_type: GenericUpgrade,
 }
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub enum MenuSystemSet {
-    Navigation,
-    Selection,
-    Confirmation,
-}
-
 pub fn spawn_level_up_menu(
     mut commands: Commands,
     weapon_upgrade_config: Res<WeaponUpgradeConfig>,
@@ -130,17 +105,15 @@ pub fn spawn_level_up_menu(
     }
 
     let Ok((_player, luck)) = luck_query.single() else {
-        panic!("Unable to get player luck");
+        return;
     };
 
     let weapons = weapon_query.iter().collect::<Vec<_>>();
 
-    info!("Generating choices for level up menu");
-
-    // Generate 3 random upgrade choices
+    // Offer only implemented upgrades, with luck allowing an extra choice.
     let choices = upgrade_pool.generate_choices(weapon_upgrade_config.as_ref(), luck, &weapons);
 
-    info!("Choices: {:?}", choices);
+    debug!("Level-up choices: {:?}", choices);
 
     commands
         .spawn((
@@ -169,7 +142,7 @@ pub fn spawn_level_up_menu(
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(20.0),
-                        width: Val::Px(600.0), // Made wider
+                        width: Val::Px(600.0),
                         padding: UiRect::all(Val::Px(30.0)),
                         border: UiRect::all(Val::Px(2.0)),
                         ..default()
@@ -182,15 +155,15 @@ pub fn spawn_level_up_menu(
                     parent.spawn((
                         Text::new("Level Up!"),
                         TextFont {
-                            font_size: FontSize::Px(48.0), // Made larger
+                            font_size: FontSize::Px(48.0),
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.8, 0.0)), // Gold color
                     ));
 
                     // Spawn upgrade choices
-                    for (index, choice) in choices.iter().enumerate() {
-                        upgrade::spawn_upgrade_choice(parent, choice.clone(), index == 0);
+                    for (index, choice) in choices.into_iter().enumerate() {
+                        upgrade::spawn_upgrade_choice(parent, choice, index == 0);
                     }
                 });
         });
@@ -260,58 +233,118 @@ pub(crate) fn get_rarity_color(rarity: &Rarity) -> Color {
     }
 }
 
-// Navigation systems
-pub fn menu_navigation(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut menu_query: Query<(Entity, &mut MenuItem, &MenuActionComponent, &ChildOf), With<Button>>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    let mut items: Vec<_> = menu_query.iter_mut().collect();
+/// One activation per frame, scoped to the active menu root.
+#[derive(Message)]
+struct MenuActivation {
+    root: Entity,
+    action: MenuAction,
+}
 
+#[derive(Default)]
+struct MenuInputState {
+    root: Option<Entity>,
+    pressed_buttons: HashSet<Entity>,
+}
+
+type MenuButtons<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut MenuItem,
+        &'static MenuActionComponent,
+        &'static Interaction,
+    ),
+    With<Button>,
+>;
+
+fn collect_menu_activation(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    roots: Query<Entity, With<MenuRoot>>,
+    children: Query<&Children>,
+    mut buttons: MenuButtons,
+    mut input: Local<MenuInputState>,
+    mut activations: MessageWriter<MenuActivation>,
+) {
+    let Ok(root) = roots.single() else {
+        input.root = None;
+        input.pressed_buttons.clear();
+        return;
+    };
+    // Children order remains stable when buttons change ECS archetypes, and
+    // unrelated UI buttons cannot join the current menu's navigation.
+    let items: Vec<_> = children
+        .iter_descendants(root)
+        .filter(|entity| buttons.contains(*entity))
+        .collect();
+    let pressed_buttons: HashSet<_> = items
+        .iter()
+        .copied()
+        .filter(|entity| {
+            buttons
+                .get(*entity)
+                .is_ok_and(|(_, _, interaction)| *interaction == Interaction::Pressed)
+        })
+        .collect();
+    // A new root never consumes the input that opened it. Track held mouse
+    // buttons too, so a held click cannot select an item on a replacement menu.
+    if input.root != Some(root) {
+        input.root = Some(root);
+        input.pressed_buttons = pressed_buttons;
+        return;
+    }
     if items.is_empty() {
         return;
     }
-
-    // Find currently selected item
-    let current_selected = items
+    let selected = items
         .iter()
-        .position(|(_, item, _, _)| item.selected)
+        .position(|entity| buttons.get(*entity).is_ok_and(|(item, _, _)| item.selected))
         .unwrap_or(0);
-
-    // Calculate new selected index
-    let items_len = items.len();
-    let new_selected = if keyboard.just_pressed(KeyCode::ArrowUp)
+    let up = keyboard.just_pressed(KeyCode::ArrowUp)
         || keyboard.just_pressed(KeyCode::KeyW)
-    {
-        (current_selected + items_len - 1) % items_len
-    } else if keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::KeyS) {
-        (current_selected + 1) % items_len
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::DPadUp));
+    let down = keyboard.just_pressed(KeyCode::ArrowDown)
+        || keyboard.just_pressed(KeyCode::KeyS)
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::DPadDown));
+    let selected = if up {
+        (selected + items.len() - 1) % items.len()
+    } else if down {
+        (selected + 1) % items.len()
     } else {
-        current_selected
+        selected
     };
-
-    // Update selection states
-    for (i, (_, ref mut item, _, _)) in items.iter_mut().enumerate() {
-        item.selected = i == new_selected;
-    }
-
-    // Handle selection
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
-        if let Some((_, _, action_component, _)) = items.get(new_selected) {
-            handle_menu_action(&action_component.action, &mut next_state);
+    for (index, entity) in items.iter().enumerate() {
+        if let Ok((mut item, _, _)) = buttons.get_mut(*entity) {
+            item.selected = index == selected;
         }
     }
+    let clicked = items
+        .iter()
+        .copied()
+        .find(|entity| pressed_buttons.contains(entity) && !input.pressed_buttons.contains(entity));
+    let confirmed = keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::Space)
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::South));
+    // An explicit click wins over keyboard focus if both occur together.
+    if let Some(entity) = clicked.or_else(|| confirmed.then_some(items[selected])) {
+        if let Ok((_, action, _)) = buttons.get(entity) {
+            activations.write(MenuActivation {
+                root,
+                action: action.action.clone(),
+            });
+        }
+    }
+    input.pressed_buttons = pressed_buttons;
 }
 
 // Basic pause menu spawning system
-pub fn spawn_pause_menu(mut commands: Commands, existing_menu: Query<(Entity, &MenuRoot)>) {
-    for (entity, root) in existing_menu.iter() {
-        info!(
-            "Found existing menu: {:?} of type {:?}",
-            entity, root.menu_type
-        );
-    }
-
+pub fn spawn_pause_menu(mut commands: Commands) {
     commands
         .spawn((
             Node {
@@ -344,7 +377,7 @@ pub fn spawn_menu_button(
 ) {
     parent
         .spawn((
-            Button { ..default() },
+            Button,
             Node {
                 width: Val::Px(200.0),
                 height: Val::Px(50.0),
@@ -378,7 +411,7 @@ pub fn spawn_pattern_button(
 ) {
     parent
         .spawn((
-            Button { ..default() },
+            Button,
             Node {
                 width: Val::Px(500.0),
                 padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
@@ -436,18 +469,16 @@ pub fn spawn_menu_container(
         });
 }
 
-pub fn cleanup_menu_state(
-    mut commands: Commands,
-    query: Query<Entity, (With<MenuRoot>, Without<MarkedForDespawn>)>,
-) {
+pub fn cleanup_menu_state(mut commands: Commands, query: Query<Entity, With<MenuRoot>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
+    commands.remove_resource::<PendingAddCircleUpgrade>();
 }
 
 pub fn update_menu_buttons(
     mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, &Interaction)>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
+    mut text_query: Query<&mut TextColor>,
 ) {
     for (menu_item, mut background_color, children, interaction) in buttons.iter_mut() {
         // Enhanced visual feedback
@@ -462,7 +493,7 @@ pub fn update_menu_buttons(
         // Update text color for all text children
         let is_highlighted = menu_item.selected || matches!(interaction, Interaction::Hovered);
         for (i, child) in children.iter().enumerate() {
-            if let Ok((_, mut text_color)) = text_query.get_mut(child) {
+            if let Ok(mut text_color) = text_query.get_mut(child) {
                 text_color.0 = if is_highlighted {
                     if i == 0 {
                         Color::srgb(1.0, 0.84, 0.0) // Title: gold
@@ -479,113 +510,72 @@ pub fn update_menu_buttons(
     }
 }
 
-pub fn handle_menu_interactions(
-    mut buttons: Query<(&Interaction, &MenuItem, &MenuActionComponent), With<Button>>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    for (interaction, _menu_item, action_component) in buttons.iter_mut() {
-        // Only handle click actions here — hover highlighting is handled
-        // by update_menu_buttons via the Interaction component directly.
-        // We deliberately do NOT mutate `selected` on hover, because that
-        // interferes with keyboard navigation in menu_navigation.
-        if *interaction == Interaction::Pressed {
-            handle_menu_action(&action_component.action, &mut next_state);
-        }
-    }
-}
-
-fn handle_menu_action(action: &MenuAction, next_state: &mut NextState<GameState>) {
-    match action {
-        MenuAction::StartGame => next_state.set(GameState::Playing),
-        MenuAction::ResumeGame => next_state.set(GameState::Playing),
-        // MenuAction::OpenSettings => next_state.set(GameState::Playing), // Until settings is implemented
-        MenuAction::QuitGame => next_state.set(GameState::Quit),
-        MenuAction::SelectUpgrade(_) => {} // Handled by upgrade system
-        MenuAction::SelectPattern(_) => {}
-    }
-}
-
-/// Same function you're using, but with the new approach
-pub fn handle_upgrade_selection_and_confirmation(
+fn dispatch_menu_action(
     mut commands: Commands,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    menu_query: Query<(Entity, &MenuType)>,
-    menu_items: Query<(&MenuItem, &MenuActionComponent, &Interaction)>,
+    mut activations: MessageReader<MenuActivation>,
+    roots: Query<&MenuRoot>,
+    pending: Option<Res<PendingAddCircleUpgrade>>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut weapon_upgrade_events: MessageWriter<WeaponUpgradeConfirmedEvent>,
-    mut generic_upgrade_events: MessageWriter<GenericUpgradeConfirmedEvent>,
+    mut weapon_upgrades: MessageWriter<WeaponUpgradeConfirmedEvent>,
+    mut generic_upgrades: MessageWriter<GenericUpgradeConfirmedEvent>,
 ) {
-    // Only process for level up menu
-    if !menu_query
-        .iter()
-        .any(|(_, menu_type)| *menu_type == MenuType::LevelUp)
-    {
-        return;
-    }
-
-    // Check keyboard/mouse selection
-    let enter_pressed =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space);
-
-    for (menu_item, action_component, interaction) in &menu_items {
-        let should_confirm =
-            (menu_item.selected && enter_pressed) || *interaction == Interaction::Pressed;
-
-        if should_confirm {
-            if let MenuAction::SelectUpgrade(upgrade_choice) = &action_component.action {
-                match &upgrade_choice.upgrade_type {
-                    UpgradeType::Weapon(weapon_type, upgrade_spec) => {
-                        // 1. Check if it has an AddCircle { pattern: None } in `changes`
-                        let has_add_circle = upgrade_spec.changes.iter().any(|change| {
+    for activation in activations.read() {
+        let Ok(root) = roots.get(activation.root) else {
+            continue;
+        };
+        match &activation.action {
+            MenuAction::RestartRun => next_state.set(GameState::Restarting),
+            MenuAction::ResumeGame => next_state.set(GameState::Playing),
+            MenuAction::QuitGame => next_state.set(GameState::Quit),
+            MenuAction::SelectUpgrade(choice) if root.menu_type == MenuType::LevelUp => {
+                commands.entity(activation.root).despawn();
+                match &choice.upgrade_type {
+                    UpgradeType::Weapon(weapon_type, spec) => {
+                        if spec.changes.iter().any(|change| {
                             matches!(change, WeaponUpgradeChange::AddCircle { pattern: None })
-                        });
-
-                        if has_add_circle {
-                            // 2. Despawn the level-up menu so we can show pattern-select
-                            for (menu_entity, _) in &menu_query {
-                                commands.entity(menu_entity).despawn();
-                            }
-
-                            // 3. Insert a resource telling us which upgrade we’re finalizing
+                        }) {
                             commands.insert_resource(PendingAddCircleUpgrade {
                                 weapon_type: *weapon_type,
-                                upgrade_spec: upgrade_spec.clone(),
+                                upgrade_spec: spec.clone(),
                             });
-
-                            // 4. Spawn the pattern-select menu
                             spawn_pattern_select_menu(&mut commands);
-
-                            // Don’t next_state.set(GameState::Playing) yet!
-                            // We’ll do that after pattern selection.
                         } else {
-                            // Normal upgrade that doesn't require pattern selection
-                            weapon_upgrade_events.write(WeaponUpgradeConfirmedEvent {
+                            weapon_upgrades.write(WeaponUpgradeConfirmedEvent {
                                 weapon_type: *weapon_type,
-                                upgrade_spec: upgrade_spec.clone(),
+                                upgrade_spec: spec.clone(),
                             });
-
-                            // Despawn menu and go back to playing
-                            for (menu_entity, _) in &menu_query {
-                                commands.entity(menu_entity).despawn();
-                            }
                             next_state.set(GameState::Playing);
                         }
                     }
-                    UpgradeType::Generic(generic_upgrade) => {
-                        // This is a normal generic upgrade
-                        generic_upgrade_events.write(GenericUpgradeConfirmedEvent {
-                            generic_upgrade_type: generic_upgrade.clone(),
+                    UpgradeType::Generic(generic) => {
+                        generic_upgrades.write(GenericUpgradeConfirmedEvent {
+                            generic_upgrade_type: *generic,
                         });
-
-                        // Despawn and return to gameplay
-                        for (menu_entity, _) in &menu_query {
-                            commands.entity(menu_entity).despawn();
-                        }
                         next_state.set(GameState::Playing);
                     }
                 }
-                break;
             }
+            MenuAction::SelectPattern(pattern) if root.menu_type == MenuType::PatternSelect => {
+                let Some(pending) = pending.as_ref() else {
+                    continue;
+                };
+                let mut spec = pending.upgrade_spec.clone();
+                if let Some(WeaponUpgradeChange::AddCircle { pattern: slot }) =
+                    spec.changes.iter_mut().find(|change| {
+                        matches!(change, WeaponUpgradeChange::AddCircle { pattern: None })
+                    })
+                {
+                    *slot = Some(*pattern);
+                }
+                weapon_upgrades.write(WeaponUpgradeConfirmedEvent {
+                    weapon_type: pending.weapon_type,
+                    upgrade_spec: spec,
+                });
+                commands.remove_resource::<PendingAddCircleUpgrade>();
+                commands.entity(activation.root).despawn();
+                next_state.set(GameState::Playing);
+            }
+            _ => {}
         }
     }
 }
@@ -596,73 +586,83 @@ pub struct PendingAddCircleUpgrade {
     pub upgrade_spec: WeaponUpgradeSpec,
 }
 
-pub fn handle_pattern_select_menu(
-    mut commands: Commands,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    menu_query: Query<(Entity, &MenuType)>,
-    buttons: Query<(&MenuItem, &MenuActionComponent, &Interaction), With<Button>>,
-    mut pending_add_circle: Option<ResMut<PendingAddCircleUpgrade>>,
-    mut weapon_upgrade_events: MessageWriter<WeaponUpgradeConfirmedEvent>,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut was_active_last_frame: Local<bool>,
+fn spawn_game_over_menu(mut commands: Commands, stats: Res<GameStats>) {
+    spawn_run_end_menu(
+        &mut commands,
+        MenuType::GameOver,
+        "Run ended",
+        "Try another build and survive the onslaught.",
+        &stats,
+    );
+}
+
+fn spawn_victory_menu(mut commands: Commands, stats: Res<GameStats>) {
+    spawn_run_end_menu(
+        &mut commands,
+        MenuType::Victory,
+        "Victory!",
+        "You survived ten minutes.",
+        &stats,
+    );
+}
+
+fn spawn_run_end_menu(
+    commands: &mut Commands,
+    menu_type: MenuType,
+    title: &str,
+    description: &str,
+    stats: &GameStats,
 ) {
-    // Make sure we only do this if the pattern-select menu is up
-    let pattern_select_active = menu_query
-        .iter()
-        .any(|(_, mtype)| *mtype == MenuType::PatternSelect);
-
-    if !pattern_select_active {
-        *was_active_last_frame = false;
-        return;
-    }
-
-    // Skip input on the first frame the menu appears. This prevents the
-    // Enter/Space keypress that opened this menu (from the level-up
-    // confirmation) from immediately confirming the first pattern.
-    if !*was_active_last_frame {
-        *was_active_last_frame = true;
-        return;
-    }
-
-    for (menu_item, action_component, interaction) in &buttons {
-        let should_confirm = (menu_item.selected
-            && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
-            || *interaction == Interaction::Pressed;
-
-        if should_confirm {
-            if let MenuAction::SelectPattern(chosen_pattern) = action_component.action {
-                // If we had a pending AddCircle upgrade
-                if let Some(mut pending) = pending_add_circle.take() {
-                    // Fill in the pattern
-                    for change in &mut pending.upgrade_spec.changes {
-                        if let WeaponUpgradeChange::AddCircle { pattern } = change {
-                            if pattern.is_none() {
-                                *pattern = Some(chosen_pattern);
-                                break;
-                            }
-                        }
-                    }
-
-                    // Now that we have a real pattern, we can finalize
-                    weapon_upgrade_events.write(WeaponUpgradeConfirmedEvent {
-                        weapon_type: pending.weapon_type,
-                        upgrade_spec: pending.upgrade_spec.clone(),
-                    });
-                    commands.remove_resource::<PendingAddCircleUpgrade>();
-                }
-
-                // Despawn the pattern menu
-                for (entity, menu_type) in &menu_query {
-                    if *menu_type == MenuType::PatternSelect {
-                        commands.entity(entity).despawn();
-                    }
-                }
-
-                // Return to normal gameplay
-                next_state.set(GameState::Playing);
-
-                break;
-            }
-        }
-    }
+    let seconds = stats.time_elapsed as u32;
+    let summary = format!(
+        "Time: {:02}:{:02}   |   Enemies defeated: {}",
+        seconds / 60,
+        seconds % 60,
+        stats.enemies_killed
+    );
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(100),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+            MenuRoot { menu_type },
+            menu_type,
+        ))
+        .with_children(|parent| {
+            spawn_menu_container(parent, |parent| {
+                parent.spawn((
+                    Text::new(title),
+                    TextFont {
+                        font_size: FontSize::Px(48.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.8, 0.0)),
+                ));
+                parent.spawn((
+                    Text::new(description),
+                    TextFont {
+                        font_size: FontSize::Px(18.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                parent.spawn((
+                    Text::new(summary),
+                    TextFont {
+                        font_size: FontSize::Px(20.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                ));
+                spawn_menu_button(parent, "Play again", MenuAction::RestartRun, true);
+                spawn_menu_button(parent, "Quit", MenuAction::QuitGame, false);
+            });
+        });
 }

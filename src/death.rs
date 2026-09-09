@@ -9,31 +9,46 @@ pub struct MarkedForDeath;
 #[derive(Component)]
 pub struct MarkedForDespawn;
 
+#[expect(
+    clippy::type_complexity,
+    reason = "The ECS queries distinguish player death from generic deaths and exclude processed entities."
+)]
 pub fn death_system(
     mut commands: Commands,
     mut game_stats: ResMut<GameStats>,
-    player_query: Query<(Entity, &Health), With<Player>>,
-    marked_entities: Query<(Entity, Option<&Transform>, Option<&Enemy>), With<MarkedForDeath>>,
+    player_query: Query<
+        (Entity, &Health, Option<&Transform>),
+        (With<Player>, Without<MarkedForDespawn>),
+    >,
+    marked_entities: Query<
+        (Entity, Option<&Transform>, Option<&Enemy>),
+        (With<MarkedForDeath>, Without<MarkedForDespawn>),
+    >,
     mut death_events: MessageWriter<EntityDeathEvent>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    // Check player death first
-    if let Ok((entity, health)) = player_query.single() {
+    // Resolve player death first, then finish other deaths in this frame so
+    // simultaneous kills still award their XP and appear in the final score.
+    let mut dead_player = None;
+    if let Ok((entity, health, transform)) = player_query.single() {
         if health.current <= 0 {
             commands.entity(entity).insert(MarkedForDespawn);
             death_events.write(EntityDeathEvent {
                 entity,
-                position: Vec2::ZERO, // Player position if needed
+                position: transform.map_or(Vec2::ZERO, |t| t.translation.truncate()),
                 exp_value: None,
             });
             next_state.set(GameState::GameOver);
-            return;
+            dead_player = Some(entity);
         }
     }
 
     // Handle marked entities
     for (entity, transform, enemy) in marked_entities.iter() {
-        if let Some(_enemy) = enemy {
+        if Some(entity) == dead_player {
+            continue;
+        }
+        if enemy.is_some() {
             game_stats.enemies_killed += 1;
         }
 

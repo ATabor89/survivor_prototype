@@ -111,11 +111,27 @@ pub fn setup_physics_bodies(
                 .entity(entity)
                 .insert((
                     RigidBody::KinematicPositionBased,
+                    KinematicCharacterController {
+                        autostep: None,
+                        snap_to_ground: None,
+                        // Top-down movement has no uphill/downhill restrictions.
+                        max_slope_climb_angle: std::f32::consts::PI,
+                        min_slope_slide_angle: -std::f32::consts::PI,
+                        apply_impulse_to_dynamic_bodies: false,
+                        filter_groups: Some(CollisionGroups::new(
+                            player_group,
+                            crate::arena::WORLD_GROUP,
+                        )),
+                        ..default()
+                    },
                     Collider::ball(12.0),
                     ActiveEvents::COLLISION_EVENTS,
                     CollisionGroups::new(
                         player_group,
-                        enemy_group | projectile_group | experience_group,
+                        enemy_group
+                            | projectile_group
+                            | experience_group
+                            | crate::arena::WORLD_GROUP,
                     ),
                     Velocity::zero(),
                     LockedAxes::ROTATION_LOCKED,
@@ -126,6 +142,7 @@ pub fn setup_physics_bodies(
                         Collider::ball(16.0),
                         Sensor,
                         ActiveEvents::COLLISION_EVENTS,
+                        CollisionGroups::new(player_group, enemy_group),
                         DamageSensor,
                         Transform::default(),
                     ));
@@ -142,7 +159,10 @@ pub fn setup_physics_bodies(
                 Velocity::zero(),
                 LockedAxes::ROTATION_LOCKED,
                 ActiveEvents::COLLISION_EVENTS,
-                CollisionGroups::new(enemy_group, player_group | enemy_group | projectile_group),
+                CollisionGroups::new(
+                    enemy_group,
+                    player_group | enemy_group | projectile_group | crate::arena::WORLD_GROUP,
+                ),
                 Damping {
                     linear_damping: 2.0,
                     angular_damping: 1.0,
@@ -152,6 +172,10 @@ pub fn setup_physics_bodies(
     }
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "Explicit ECS filters exclude dead enemies from contact damage."
+)]
 pub fn handle_player_enemy_collision(
     context_query: ReadRapierContext,
     player_query: Query<(Entity, &Transform), With<Player>>,
@@ -208,7 +232,7 @@ pub fn handle_player_enemy_collision(
     if intersecting_enemies > 0 {
         damage_events.write(DamageEvent {
             target: player_entity,
-            amount: 1 * intersecting_enemies,
+            amount: intersecting_enemies,
             source: None,
         });
     }

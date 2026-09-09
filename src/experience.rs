@@ -1,7 +1,8 @@
 use crate::components::*;
-use crate::death::MarkedForDespawn;
+use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::events::EntityDeathEvent;
 use crate::resources::GameState;
+use crate::GameplaySets;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
@@ -18,6 +19,7 @@ impl Plugin for ExperiencePlugin {
                 check_level_up,
             )
                 .chain()
+                .in_set(GameplaySets::Experience)
                 .run_if(in_state(GameState::Playing)),
         );
     }
@@ -59,11 +61,27 @@ pub(crate) fn calculate_experience_needed(level: u32) -> u32 {
     (base_xp as f32 * scaling.powi((level - 1) as i32)) as u32
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "The ECS query explicitly restricts progression to living players."
+)]
 pub fn check_level_up(
-    mut player_query: Query<&mut Experience, With<Player>>,
+    mut player_query: Query<
+        (&mut Experience, &Health),
+        (
+            With<Player>,
+            Without<MarkedForDeath>,
+            Without<MarkedForDespawn>,
+        ),
+    >,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if let Ok(mut experience) = player_query.single_mut() {
+    if let Ok((mut experience, health)) = player_query.single_mut() {
+        // Combat resolves first. A lethal hit takes priority over a level earned
+        // in the same frame, so leveling cannot replace the GameOver transition.
+        if health.current <= 0 {
+            return;
+        }
         let xp_needed = calculate_experience_needed(experience.level);
 
         if experience.current >= xp_needed {
@@ -83,6 +101,10 @@ fn spawn_experience_orbs(
 ) {
     for event in death_events.read() {
         if let Some(exp_value) = event.exp_value.filter(|value| *value > 0) {
+            debug!(
+                "Dropping {} experience from {:?} at {:?}",
+                exp_value, event.entity, event.position
+            );
             commands.spawn((
                 ExperienceOrb { value: exp_value },
                 Vacuumable::default(),
@@ -94,6 +116,7 @@ fn spawn_experience_orbs(
                 Transform::from_translation(event.position.extend(0.0)),
                 // Add Rapier components
                 RigidBody::Dynamic,
+                Velocity::zero(),
                 Collider::ball(4.0), // Smaller collision radius than visual
                 Sensor,              // Make it a sensor so it doesn't affect physics
                 ActiveEvents::COLLISION_EVENTS,
@@ -112,79 +135,72 @@ fn spawn_experience_orbs(
 }
 
 fn vacuum_system(
-    mut commands: Commands,
-    mut params: ParamSet<(
-        Query<(&Transform, &Player)>,
-        Query<(Entity, &Transform, &Vacuumable, Option<&mut Velocity>)>,
-    )>,
+    player_query: Query<(&Transform, &Player)>,
+    mut items: Query<(&Transform, &Vacuumable, &mut Velocity), Without<MarkedForDespawn>>,
 ) {
-    // Collect player data first
-    let player_data = {
-        let player_query = params.p0();
-        if let Ok((transform, player)) = player_query.single() {
-            Some((
-                transform.translation,
-                player.magnet_strength,
-                player.magnet_speed,
-            ))
-        } else {
-            None
-        }
+    let Ok((player_transform, player)) = player_query.single() else {
+        return;
     };
 
-    // Early return if no player
-    let (player_pos, magnet_strength, magnet_speed) = match player_data {
-        Some(data) => data,
-        None => return,
-    };
-
-    // Then update vacuumable items
-    for (entity, item_transform, vacuumable, _velocity) in params.p1().iter() {
-        let to_player = player_pos - item_transform.translation;
+    for (item_transform, vacuumable, mut velocity) in &mut items {
+        let to_player = (player_transform.translation - item_transform.translation).truncate();
         let distance = to_player.length();
 
-        if distance < magnet_strength {
-            let vacuum_influence = 1.0 - (distance / magnet_strength).powi(2);
-            let vacuum_direction = to_player.normalize();
+        if distance < player.magnet_strength {
+            let vacuum_influence = 1.0 - (distance / player.magnet_strength).powi(2);
+            // An orb can spawn exactly under the player. Keep Rapier's velocity
+            // finite until its sensor intersection is available for collection.
+            let vacuum_direction = to_player.normalize_or_zero();
 
             let speed = vacuumable.base_speed
                 * (vacuum_influence * 2.0 + vacuum_influence.powi(3))
-                * magnet_speed;
+                * player.magnet_speed;
 
-            // Set velocity using commands since we can't mutate it directly in a ParamSet
-            commands
-                .entity(entity)
-                .insert(Velocity::linear(vacuum_direction.truncate() * speed));
+            velocity.linear = vacuum_direction * speed;
         }
     }
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "The ECS query explicitly excludes dying players from pickup collection."
+)]
 fn collect_experience_orbs(
     mut commands: Commands,
-    mut player_query: Query<(Entity, &mut Experience), With<Player>>,
+    mut player_query: Query<
+        (Entity, &mut Experience),
+        (
+            With<Player>,
+            Without<MarkedForDeath>,
+            Without<MarkedForDespawn>,
+        ),
+    >,
     orb_query: Query<(Entity, &ExperienceOrb), Without<MarkedForDespawn>>,
-    mut collision_events: MessageReader<CollisionEvent>,
+    context_query: ReadRapierContext,
 ) {
     let Ok((player_entity, mut player_exp)) = player_query.single_mut() else {
         return;
     };
 
-    for event in collision_events.read() {
-        if let CollisionEvent::Started(e1, e2, _) = event {
-            let (_player, orb) = if *e1 == player_entity {
-                (*e1, *e2)
-            } else if *e2 == player_entity {
-                (*e2, *e1)
-            } else {
-                continue;
-            };
+    let Ok(context) = context_query.single() else {
+        return;
+    };
 
-            // If this is an experience orb
-            if let Ok((orb_entity, exp_orb)) = orb_query.get(orb) {
-                info!("Collected {} experience", exp_orb.value);
-                player_exp.current += exp_orb.value;
-                commands.entity(orb_entity).insert(MarkedForDespawn);
-            }
+    // Read the physics engine's current overlaps, rather than transient Started
+    // messages which can expire while the gameplay systems are paused.
+    for (first, second, intersecting) in context.intersection_pairs_with(player_entity) {
+        if !intersecting {
+            continue;
+        }
+        let orb = if first == player_entity {
+            second
+        } else {
+            first
+        };
+        if let Ok((orb_entity, exp_orb)) = orb_query.get(orb) {
+            debug!("Collected {} experience", exp_orb.value);
+            player_exp.current += exp_orb.value;
+            commands.entity(orb_entity).insert(MarkedForDespawn);
         }
     }
 }

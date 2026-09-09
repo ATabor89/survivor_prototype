@@ -3,7 +3,7 @@ use crate::components::{
     AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Health, Luck, Player,
 };
 use crate::experience::Experience;
-use crate::resources::{GameState, GameTextures, SpawnTimer, WaveConfig};
+use crate::resources::{GameState, GameTextures};
 use crate::weapons::{BindingEffect, InvocationPull, StartingWeapon, WeaponType};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -17,7 +17,6 @@ pub fn load_textures(
     // Load the sprite sheet images
     let player_texture: Handle<Image> = asset_server.load("sprites/occult-characters-v1.png");
     let enemy_texture = player_texture.clone();
-    let projectile_texture: Handle<Image> = asset_server.load("sprites/projectiles.png");
 
     // Create texture atlas layouts
     let player_layout = TextureAtlasLayout::from_grid(
@@ -36,27 +35,16 @@ pub fn load_textures(
         None, // Offset
     );
 
-    let projectile_layout = TextureAtlasLayout::from_grid(
-        UVec2::new(16, 16), // Sprite size
-        2,
-        1,    // Grid size (2 types of projectiles)
-        None, // Padding
-        None, // Offset
-    );
-
     // Store the layouts
     let player_layout_handle = texture_atlas_layouts.add(player_layout);
     let enemy_layout_handle = texture_atlas_layouts.add(enemy_layout);
-    let projectile_layout_handle = texture_atlas_layouts.add(projectile_layout);
 
     // Store handles in our resource
     commands.insert_resource(GameTextures {
         player: player_texture,
         enemies: enemy_texture,
-        projectiles: projectile_texture,
         player_layout: player_layout_handle,
         enemies_layout: enemy_layout_handle,
-        projectiles_layout: projectile_layout_handle,
     });
 }
 
@@ -70,15 +58,16 @@ pub fn gameplay_movement_system(
     game_state: Res<State<GameState>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    mut query: Query<(&Player, &mut Transform)>,
+    gamepads: Query<&Gamepad>,
+    mut query: Query<(&Player, &mut KinematicCharacterController)>,
 ) {
     // Only process movement in Playing state
     if *game_state.get() != GameState::Playing {
         return;
     }
 
-    for (player, mut transform) in query.iter_mut() {
-        let mut direction = Vec3::ZERO;
+    for (player, mut controller) in query.iter_mut() {
+        let mut direction = Vec2::ZERO;
 
         if keyboard.pressed(KeyCode::KeyW) {
             direction.y += 1.0;
@@ -93,19 +82,28 @@ pub fn gameplay_movement_system(
             direction.x += 1.0;
         }
 
-        if direction != Vec3::ZERO {
-            direction = direction.normalize();
-            transform.translation += direction * player.speed * time.delta_secs();
+        for gamepad in &gamepads {
+            let stick = gamepad.left_stick();
+            if stick.length_squared() > 0.04 {
+                direction += stick;
+            }
         }
+        controller.translation =
+            Some(direction.clamp_length_max(1.0) * player.speed * time.delta_secs());
     }
 }
 
 pub fn universal_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
     game_state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Escape) {
+    if keyboard.just_pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::Start))
+    {
         match *game_state.get() {
             GameState::Playing => next_state.set(GameState::Paused),
             GameState::Paused => next_state.set(GameState::Playing),
@@ -133,7 +131,11 @@ pub fn handle_pause_state(
                 rapier_config.physics_pipeline_active = true;
                 time.unpause();
             }
-            GameState::Paused | GameState::LevelUp | GameState::GameOver => {
+            GameState::Paused
+            | GameState::LevelUp
+            | GameState::GameOver
+            | GameState::Victory
+            | GameState::Restarting => {
                 // Pause physics and time for any state where the game should be frozen
                 rapier_config.physics_pipeline_active = false;
                 time.pause();
@@ -145,6 +147,8 @@ pub fn handle_pause_state(
 
 pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
     commands.spawn((
+        crate::run::RunEntity,
+        Name::new("Occultist"),
         Player {
             speed: 150.0,
             magnet_strength: 150.0, // Base vacuum range
@@ -176,63 +180,6 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         DamageCooldown::default(),
         StartingWeapon(WeaponType::MagickCircle),
     ));
-
-    commands.spawn(Camera2d::default());
-}
-
-pub fn spawn_enemies(
-    mut commands: Commands,
-    game_textures: Res<GameTextures>,
-    time: Res<Time<Virtual>>,
-    mut timer: ResMut<SpawnTimer>,
-    wave_config: Res<WaveConfig>,
-    enemy_query: Query<&Enemy>,
-    player_query: Query<&Transform, With<Player>>,
-    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
-) {
-    #[cfg(feature = "dev-tools")]
-    if !debug.waves {
-        return;
-    }
-    if timer.0.tick(time.delta()).just_finished()
-        && enemy_query.iter().count() < wave_config.max_enemies as usize
-    {
-        // Use single() instead of single() to handle missing player gracefully
-        let player_transform = match player_query.single() {
-            Ok(transform) => transform,
-            Err(_) => return, // If no player exists, just return
-        };
-
-        let spawn_distance = 400.0;
-        let random_angle = rand::random::<f32>() * std::f32::consts::TAU;
-        let spawn_position = player_transform.translation
-            + Vec3::new(
-                random_angle.cos() * spawn_distance,
-                random_angle.sin() * spawn_distance,
-                0.0,
-            );
-
-        commands.spawn((
-            Enemy {
-                speed: 100.0,
-                experience_value: 10, // Ordinary reward; dev tools provide instant level-ups.
-            },
-            Sprite {
-                image: game_textures.enemies.clone(),
-                custom_size: Some(Vec2::splat(48.0)),
-                texture_atlas: Some(TextureAtlas {
-                    layout: game_textures.enemies_layout.clone(),
-                    index: 1,
-                }),
-                ..default()
-            },
-            Transform::from_translation(spawn_position),
-            Health {
-                current: 20,
-                maximum: 20,
-            },
-        ));
-    }
 }
 
 pub fn enemy_movement(

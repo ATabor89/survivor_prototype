@@ -1,5 +1,6 @@
 use crate::components::{Health, Player};
-use crate::resources::GameStats;
+use crate::experience::{calculate_experience_needed, Experience};
+use crate::resources::{GameStats, WaveConfig};
 use bevy::prelude::*;
 
 // Root node marker
@@ -17,6 +18,10 @@ pub struct GameTimer;
 
 #[derive(Component)]
 pub struct KillCounter;
+#[derive(Component)]
+pub struct RunStatus;
+#[derive(Component)]
+pub struct ExperienceStatus;
 
 pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
@@ -113,6 +118,37 @@ pub fn spawn_ui(mut commands: Commands) {
                 TextColor(Color::WHITE),
                 KillCounter,
             ));
+            parent.spawn((
+                Text::new("Wave 1 / 10"),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.82, 0.76, 0.55)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(48.0),
+                    left: Val::Percent(50.0),
+                    margin: UiRect::left(Val::Px(-56.0)),
+                    ..default()
+                },
+                RunStatus,
+            ));
+            parent.spawn((
+                Text::new("Level 1   0 / 100 XP"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.65, 0.82, 0.95)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(48.0),
+                    left: Val::Px(10.0),
+                    ..default()
+                },
+                ExperienceStatus,
+            ));
         });
 }
 
@@ -123,14 +159,41 @@ pub fn cleanup_ui(mut commands: Commands, ui_query: Query<Entity, With<GameUI>>)
 }
 
 pub fn update_game_timer(
-    time: Res<Time<Virtual>>,
+    stats: Res<GameStats>,
     mut timer_query: Query<&mut Text, With<GameTimer>>,
 ) {
     if let Ok(mut text) = timer_query.single_mut() {
-        let total_secs = time.elapsed_secs() as u32;
+        let total_secs = stats.time_elapsed as u32;
         let minutes = total_secs / 60;
         let seconds = total_secs % 60;
         text.0 = format!("{:02}:{:02}", minutes, seconds);
+    }
+}
+
+#[expect(
+    clippy::type_complexity,
+    reason = "ParamSet safely shares mutable Text access between HUD labels."
+)]
+pub fn update_run_status(
+    wave: Res<WaveConfig>,
+    xp: Query<&Experience, With<Player>>,
+    mut labels: ParamSet<(
+        Query<&mut Text, With<RunStatus>>,
+        Query<&mut Text, With<ExperienceStatus>>,
+    )>,
+) {
+    if let Ok(mut text) = labels.p0().single_mut() {
+        text.0 = format!("Wave {} / 10", wave.current_wave.max(1));
+    }
+    if let Ok(xp) = xp.single() {
+        if let Ok(mut text) = labels.p1().single_mut() {
+            text.0 = format!(
+                "Level {}   {} / {} XP",
+                xp.level,
+                xp.current,
+                calculate_experience_needed(xp.level)
+            );
+        }
     }
 }
 

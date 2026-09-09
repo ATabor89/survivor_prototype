@@ -17,7 +17,7 @@ use weapons::{WeaponDamage, WeaponMeta};
 
 // Run the actual game plugins and Rapier without a window/GPU. Input is supplied
 // directly so each test controls the exact frame in which a key is pressed.
-fn game() -> App {
+pub(crate) fn game() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -44,7 +44,7 @@ fn game() -> App {
     app
 }
 
-fn step(app: &mut App, frames: usize) {
+pub(crate) fn step(app: &mut App, frames: usize) {
     for _ in 0..frames {
         app.update();
         app.world_mut()
@@ -53,7 +53,7 @@ fn step(app: &mut App, frames: usize) {
     }
 }
 
-fn key(app: &mut App, key: KeyCode) {
+pub(crate) fn key(app: &mut App, key: KeyCode) {
     app.world_mut()
         .resource_mut::<ButtonInput<KeyCode>>()
         .press(key);
@@ -63,21 +63,21 @@ fn key(app: &mut App, key: KeyCode) {
         .release(key);
 }
 
-fn player(app: &mut App) -> Entity {
+pub(crate) fn player(app: &mut App) -> Entity {
     app.world_mut()
         .query_filtered::<Entity, With<Player>>()
         .single(app.world())
         .unwrap()
 }
 
-fn count<T: Component>(app: &mut App) -> usize {
+pub(crate) fn count<T: Component>(app: &mut App) -> usize {
     app.world_mut()
         .query_filtered::<Entity, With<T>>()
         .iter(app.world())
         .count()
 }
 
-fn state(app: &App) -> GameState {
+pub(crate) fn state(app: &App) -> GameState {
     app.world().resource::<State<GameState>>().get().clone()
 }
 
