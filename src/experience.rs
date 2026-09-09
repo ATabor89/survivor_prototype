@@ -48,7 +48,7 @@ impl Default for Vacuumable {
 }
 
 // Could move this to a config resource if we want to make it data-driven
-fn calculate_experience_needed(level: u32) -> u32 {
+pub(crate) fn calculate_experience_needed(level: u32) -> u32 {
     // Simple exponential scaling: each level needs 25% more XP than the last
     // Level 1->2: 100 XP
     // Level 2->3: 125 XP
@@ -82,7 +82,7 @@ fn spawn_experience_orbs(
     mut death_events: MessageReader<EntityDeathEvent>,
 ) {
     for event in death_events.read() {
-        if let Some(exp_value) = event.exp_value {
+        if let Some(exp_value) = event.exp_value.filter(|value| *value > 0) {
             commands.spawn((
                 ExperienceOrb { value: exp_value },
                 Vacuumable::default(),

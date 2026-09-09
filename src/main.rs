@@ -1,6 +1,8 @@
 mod combat;
 mod components;
 mod death;
+#[cfg(feature = "dev-tools")]
+mod dev_tools;
 mod events;
 mod experience;
 mod menu;
@@ -51,6 +53,8 @@ pub struct SurvivorsGamePlugin;
 
 impl Plugin for SurvivorsGamePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "dev-tools")]
+        app.add_plugins(dev_tools::DebugActionsPlugin);
         app
             // Resources
             .init_resource::<Time<Virtual>>()
@@ -155,23 +159,25 @@ impl Plugin for SurvivorsGamePlugin {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(LogPlugin {
-                    level: Level::INFO,                                // Only show INFO and above
-                    filter: "wgpu=error,bevy_render=info".to_string(), // Customize per-crate logging
-                    ..default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Survivors-Like Prototype".to_string(),
-                        ..Default::default()
-                    }),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(LogPlugin {
+                level: Level::INFO,                                // Only show INFO and above
+                filter: "wgpu=error,bevy_render=info".to_string(), // Customize per-crate logging
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Survivors-Like Prototype".to_string(),
                     ..Default::default()
                 }),
-        )
-        .add_plugins(ShapePlugin)
-        .add_plugins(SurvivorsGamePlugin)
-        .run();
+                ..Default::default()
+            }),
+    )
+    .add_plugins(ShapePlugin)
+    .add_plugins(SurvivorsGamePlugin);
+    #[cfg(feature = "dev-tools")]
+    app.add_plugins((bevy_egui::EguiPlugin::default(), dev_tools::DebugUiPlugin));
+    app.run();
 }

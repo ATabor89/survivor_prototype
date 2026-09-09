@@ -65,7 +65,7 @@ An occult-themed survivors-like game inspired by Vampire Survivors and HoloCure,
 | Health / damage | Done | Cooldown-based, protection buff |
 | Physics (Rapier2D) | Done | Collision groups, sensors |
 | HUD (health, timer, kills) | Done | Health bar, game timer, kill count |
-| Circle overlap detection | In Progress | Tracking overlapping patterns per enemy |
+| Circle composition | Done | Independent effects, deterministic stacking, overlap diagnostics; tuning remains provisional |
 | Weapon upgrade progression | Done | 8 levels + limit breaks |
 
 ### What Does Not Exist Yet
@@ -230,14 +230,14 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 | **Banishment** | Red-orange | Triangle (3-sided) | 4 | 1.5 (fast) | Direct damage |
 | **Binding** | Purple | Hexagon (6-sided) | 6 | 0.5 (slow) | Roots enemies; expires 1s after the last effect tick |
 | **Invocation** | Teal | Pentagram (5-sided) | 5 | -1.0 (reverse) | Pulls enemies toward center |
-| **Manifestation** | Green | Star (6-pointed) | 3 | 0.8 (moderate) | 1.5x damage bursts |
+| **Manifestation** | Green | Star (6-pointed) | 3 | 0.8 (moderate) | Charges 1.25s, then erupts for 3x damage |
 | **Protection** | Silver-blue | Diamond (4-sided) | 4 | 0.7 (steady) | 50% damage reduction to player |
 
 ### 5.2 Circle Mechanics
 
 - **Spawning:** Circles spawn on cooldown (base 3.5s), positioned around the player
 - **Duration:** Each circle lasts 3 seconds before despawning
-- **Area Effect Tick:** Damage and Binding refresh every 0.5 seconds. Invocation pulls continuously while inside; Protection is checked every frame.
+- **Area Effect Tick:** Banishment and Binding pulse every 0.5 seconds; Manifestation erupts every 1.25 seconds. Timers start at circle spawn. Invocation and Protection apply continuously.
 - **Orbiting Sigils:** Visual sigils orbit the circle center at pattern-specific speeds
 - **Base Damage:** 10 (modified by upgrades and multipliers)
 - **Base Radius:** 64 pixels
@@ -253,7 +253,7 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 - `InvocationPull` - Pull-toward-center force
 - `ProtectionBuff` - Damage reduction applied to player
 
-### 5.4 Overlap System (In Progress)
+### 5.4 Composition and Overlap Tracking
 
 Located in `weapons/overlap.rs`. Detects when enemies are inside multiple circles simultaneously:
 
@@ -261,7 +261,7 @@ Located in `weapons/overlap.rs`. Detects when enemies are inside multiple circle
 - `ActiveOverlaps` - Tracks physical circle pairs and their shared enemies; lookup helpers return unique, unordered pattern combinations
 - `OverlappingPatterns` - Component attached to enemies in 2+ circles
 
-This is the foundation for combo/synergy effects between different pattern types (not yet implemented).
+Combinations compose ordinary effects without special pair bonuses. Damage adds per source, roots refresh, pulls combine with a speed cap, and wards use the strongest reduction. Automatic circle placement is intentional. See [the composition and Circle Lab guide](CIRCLE-COMPOSITION.md) for rules, tuning, and playtest controls.
 
 Pattern combinations have stable ordering and include same-pattern overlaps. Multiple physical circle pairs remain available separately, so a future combo design can choose its own stacking rules. Weapon effects run before enemy movement and combat; damage is handled before death processing.
 
@@ -501,7 +501,7 @@ assets/
 
 ### Near-Term
 
-- [ ] Circle overlap combo effects - what happens when Banishment + Binding overlap? Define combo table
+- [ ] Playtest composition balance, especially Manifestation timing and automatic overlap positioning
 - [ ] Enemy variety - different enemy types with distinct behavior
 - [ ] Main menu implementation
 - [ ] Sound design - what audio style fits the occult theme?
@@ -526,7 +526,7 @@ assets/
 
 ### Design Decisions Needed
 
-- How should circle overlap combos work? Additive effects? Unique combo effects per pair?
+- Do composition-based builds provide enough variety, or should exceptional named combos be added later?
 - Should traditions be unlocked sequentially or chosen by the player?
 - How does the hub world connect to the survivors gameplay loop?
 - What is the target run length for an expedition?

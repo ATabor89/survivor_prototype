@@ -8,6 +8,8 @@ pub enum GameState {
     Playing,
     LevelUp,
     Paused,
+    #[cfg(feature = "dev-tools")]
+    DebugTools,
     GameOver,
     Quit,
 }

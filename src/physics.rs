@@ -33,7 +33,10 @@ impl Plugin for PhysicsPlugin {
 
         #[cfg(debug_assertions)]
         {
-            app.add_plugins(RapierDebugRenderPlugin::default());
+            app.add_plugins(RapierDebugRenderPlugin {
+                enabled: false,
+                ..default()
+            });
         }
 
         app.add_systems(

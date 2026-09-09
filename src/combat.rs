@@ -47,8 +47,14 @@ pub fn handle_damage(
     mut health_query: Query<&mut Health>,
     mut cooldown_query: Query<&mut DamageCooldown>,
     protection_query: Query<&ProtectionBuff>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
+    #[cfg(feature = "dev-tools")] player_query: Query<(), With<crate::components::Player>>,
 ) {
     for event in damage_events.read() {
+        #[cfg(feature = "dev-tools")]
+        if debug.invulnerable && player_query.contains(event.target) {
+            continue;
+        }
         info!(
             "Processing damage event for {:?}, amount: {}",
             event.target, event.amount

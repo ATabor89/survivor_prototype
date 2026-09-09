@@ -1,0 +1,9 @@
+# Provisional character art
+
+`occult-characters-v1.png` is a 1774 x 887 RGBA atlas generated with the built-in image-generation tool. It contains two 887 x 887 cells: blue-robed player at index 0, crimson enemy at index 1. Transparency was checked at the outer corner and between the figures. The game renders each cell in a 48 x 48 square; existing collision sizes remain independent of the art. The old `player.png` and `enemies.png` are retained.
+
+This is a provisional visual direction, not final art or an animation set.
+
+## Generation prompt
+
+Create a production-usable transparent PNG sprite atlas for a top-down occult survivors video game. Asset type: one sprite sheet, exactly TWO square cells side by side, total canvas aspect ratio 2:1, ideally 1024x512. True transparent alpha background everywhere around the figures, no backdrop, no checkerboard painted into the image. Each square cell has exactly one full-body sprite centered at the exact midpoint of its cell, same apparent height, generous transparent margins of about 10% on each side. Left cell: player occultist, blue hood and robe, ivory trim, small warm brass talisman, pale face mostly in shadow, compact readable silhouette. Right cell: enemy, a hunched crimson-robed hollow acolyte with dark face and two small amber eyes, claw-like hands, clearly different silhouette. Both facing downward toward viewer with slightly top-down 3/4 game camera perspective, neutral idle pose, feet fully visible. Art direction: crisp stylized pixel-art-like shapes with a restrained palette and bold dark outlines, strong readability downsampled to 40 pixels tall, broad color masses, minimal tiny detail. No text, labels, grids, cell outlines, ground shadows, circles, particles, weapons, scenery, or extra figures. Provisional game sprites, cohesive art style between both figures. Keep each sprite wholly within its own half of the image.

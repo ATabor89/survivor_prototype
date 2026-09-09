@@ -24,6 +24,28 @@ pub struct MagickCircle {
     pub num_sigils: u32,
 }
 
+#[derive(Component)]
+pub struct ManifestationCharge;
+
+pub fn animate_manifestation_charge(
+    circles: Query<(&AreaEffect, &Lifetime)>,
+    mut seals: Query<(&ChildOf, &mut Transform), With<ManifestationCharge>>,
+) {
+    for (parent, mut transform) in &mut seals {
+        if let Ok((effect, lifetime)) = circles.get(parent.parent()) {
+            let erupting = effect.timer.just_finished()
+                || (lifetime.timer.elapsed() >= effect.timer.duration()
+                    && effect.timer.elapsed_secs() < 0.15);
+            let scale = if erupting {
+                1.0 + (0.15 - effect.timer.elapsed_secs()).max(0.0) * 2.0
+            } else {
+                0.1 + 0.9 * effect.timer.fraction()
+            };
+            transform.scale = Vec3::new(scale, scale, 1.0);
+        }
+    }
+}
+
 #[derive(Component, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 pub enum PatternType {
     Banishment,    // Damages/pushes enemies
@@ -71,7 +93,9 @@ impl PatternType {
             PatternType::Binding => "Roots enemies, lingering briefly after they leave".to_string(),
             PatternType::Banishment => "Damages enemies within the circle".to_string(),
             PatternType::Invocation => "Pulls enemies toward the circle's center".to_string(),
-            PatternType::Manifestation => "Creates periodic effects within the circle".to_string(),
+            PatternType::Manifestation => {
+                "Charges for 1.25s, then erupts for triple damage".to_string()
+            }
         }
     }
 
@@ -158,11 +182,6 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, picku
                 num_sigils: 4,
             },
             // Optional modifiers
-            AreaEffect {
-                duration: 0.5,
-                tick_rate: 0.5,
-                last_tick: 0.0,
-            },
             // Could add other modifiers like PiercingAttack or Knockback
             // based on configuration
         ));
@@ -243,11 +262,7 @@ pub fn spawn_magick_circle_attack(
             },
             Damage { amount: damage },
             Area { radius },
-            AreaEffect {
-                duration: 0.5,
-                tick_rate: 0.5,
-                last_tick: 0.0,
-            },
+            AreaEffect::new(pattern_type),
             ShapeBuilder::with(&shapes::Circle {
                 radius,
                 center: Vec2::ZERO,
@@ -267,6 +282,21 @@ pub fn spawn_magick_circle_attack(
         .id();
 
     // Then spawn sigils as children of the attack
+    if pattern_type == PatternType::Manifestation {
+        commands.entity(attack_entity).with_children(|parent| {
+            parent.spawn((
+                ManifestationCharge,
+                ShapeBuilder::with(&shapes::Circle {
+                    radius: radius * 0.85,
+                    center: Vec2::ZERO,
+                })
+                .stroke((Color::srgb(0.7, 1.0, 0.3), 2.0))
+                .fill(Color::srgba(0.5, 0.9, 0.2, 0.12))
+                .build(),
+                Transform::from_xyz(0.0, 0.0, 0.1).with_scale(Vec3::splat(0.1)),
+            ));
+        });
+    }
     let sigil_size = radius * 0.25;
     let actual_num_sigils = visuals.num_sigils;
     for i in 0..actual_num_sigils {

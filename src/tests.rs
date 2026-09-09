@@ -89,6 +89,284 @@ fn circle(app: &mut App, pattern: PatternType, position: Vec3) -> Entity {
         .unwrap()
 }
 
+fn durable_enemy(app: &mut App, position: Vec3) -> Entity {
+    app.world_mut()
+        .spawn((
+            Enemy {
+                speed: 0.0,
+                experience_value: 0,
+            },
+            Health {
+                current: 1000,
+                maximum: 1000,
+            },
+            Transform::from_translation(position),
+        ))
+        .id()
+}
+
+#[test]
+fn every_pair_duplicate_and_triple_composes_without_special_combo_dispatch() {
+    use strum::IntoEnumIterator;
+    let patterns: Vec<_> = PatternType::iter().collect();
+    let mut builds = Vec::new();
+    for (index, first) in patterns.iter().enumerate() {
+        for second in &patterns[index..] {
+            builds.push(vec![*first, *second]);
+        }
+    }
+    builds.push(vec![
+        PatternType::Banishment,
+        PatternType::Binding,
+        PatternType::Manifestation,
+    ]);
+    builds.push(vec![
+        PatternType::Banishment,
+        PatternType::Binding,
+        PatternType::Invocation,
+    ]);
+    for build in builds {
+        let mut app = game();
+        let position = Vec3::new(250.0, 0.0, 0.0);
+        let enemy = durable_enemy(&mut app, position);
+        for pattern in &build {
+            circle(&mut app, *pattern, position);
+        }
+        step(&mut app, 80);
+        // 1.33s: two steady damage ticks and one fully charged eruption per source.
+        let damage: i32 = build
+            .iter()
+            .map(|pattern| match pattern {
+                PatternType::Banishment => 20,
+                PatternType::Manifestation => 30,
+                _ => 0,
+            })
+            .sum();
+        assert_eq!(
+            app.world().get::<Health>(enemy).unwrap().current,
+            1000 - damage,
+            "{build:?}"
+        );
+        assert_eq!(
+            app.world().get::<weapons::BindingEffect>(enemy).is_some(),
+            build.contains(&PatternType::Binding)
+        );
+        assert_eq!(
+            app.world().get::<weapons::InvocationPull>(enemy).is_some(),
+            build.contains(&PatternType::Invocation)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<weapons::overlap::ActiveOverlaps>()
+                .overlaps
+                .len(),
+            build.len() * (build.len() - 1) / 2
+        );
+        assert!(app
+            .world()
+            .get::<Transform>(enemy)
+            .unwrap()
+            .translation
+            .is_finite());
+    }
+}
+
+#[test]
+fn pulls_cancel_or_combine_with_a_cap_and_move_rooted_enemies() {
+    for reverse in [false, true] {
+        let mut app = game();
+        let position = Vec3::new(250.0, 0.0, 0.0);
+        let enemy = durable_enemy(&mut app, position);
+        let (left, right) = if reverse {
+            (270.0, 230.0)
+        } else {
+            (230.0, 270.0)
+        };
+        circle(&mut app, PatternType::Invocation, Vec3::new(left, 0.0, 0.0));
+        circle(
+            &mut app,
+            PatternType::Invocation,
+            Vec3::new(right, 0.0, 0.0),
+        );
+        step(&mut app, 5);
+        assert!(
+            app.world()
+                .get::<weapons::InvocationPull>(enemy)
+                .unwrap()
+                .velocity
+                .length()
+                < 0.01
+        );
+        assert!(app.world().get::<Velocity>(enemy).unwrap().linear.length() < 0.01);
+    }
+    let mut app = game();
+    let enemy = durable_enemy(&mut app, Vec3::new(250.0, 0.0, 0.0));
+    for _ in 0..3 {
+        circle(
+            &mut app,
+            PatternType::Invocation,
+            Vec3::new(300.0, 0.0, 0.0),
+        );
+    }
+    let root = circle(&mut app, PatternType::Binding, Vec3::new(250.0, 0.0, 0.0));
+    step(&mut app, 3);
+    app.world_mut()
+        .get_mut::<weapons::AreaEffect>(root)
+        .unwrap()
+        .timer
+        .set_elapsed(Duration::from_secs_f32(0.5));
+    step(&mut app, 1);
+    assert!(app.world().get::<weapons::BindingEffect>(enemy).is_some());
+    assert!(
+        (app.world()
+            .get::<weapons::InvocationPull>(enemy)
+            .unwrap()
+            .velocity
+            .x
+            - weapons::effects::PULL_SPEED_CAP)
+            .abs()
+            < 0.01
+    );
+    assert!(app.world().get::<Velocity>(enemy).unwrap().linear.x > 150.0);
+}
+
+#[test]
+fn manifestation_charges_from_spawn_time_and_pauses_without_early_damage() {
+    let mut app = game();
+    step(&mut app, 70); // Spawn late: the global game clock must not trigger an eruption.
+    let enemy = durable_enemy(&mut app, Vec3::new(250.0, 0.0, 0.0));
+    let attack = circle(
+        &mut app,
+        PatternType::Manifestation,
+        Vec3::new(250.0, 0.0, 0.0),
+    );
+    step(&mut app, 65);
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 1000);
+    key(&mut app, KeyCode::Escape);
+    step(&mut app, 2);
+    let elapsed = app
+        .world()
+        .get::<weapons::AreaEffect>(attack)
+        .unwrap()
+        .timer
+        .elapsed();
+    step(&mut app, 100);
+    assert_eq!(
+        app.world()
+            .get::<weapons::AreaEffect>(attack)
+            .unwrap()
+            .timer
+            .elapsed(),
+        elapsed
+    );
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 1000);
+    key(&mut app, KeyCode::Escape);
+    step(&mut app, 18);
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 970);
+    step(&mut app, 75);
+    assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 940);
+}
+
+#[test]
+fn duplicate_wards_do_not_stack_and_zero_xp_targets_drop_nothing() {
+    let mut app = game();
+    let player = player(&mut app);
+    for _ in 0..3 {
+        circle(&mut app, PatternType::Protection, Vec3::ZERO);
+    }
+    step(&mut app, 5);
+    assert_eq!(
+        app.world()
+            .get::<weapons::ProtectionBuff>(player)
+            .unwrap()
+            .damage_reduction,
+        0.5
+    );
+    app.world_mut()
+        .get_mut::<combat::DamageCooldown>(player)
+        .unwrap()
+        .time = -1.0;
+    app.world_mut().write_message(DamageEvent {
+        target: player,
+        amount: 20,
+        source: None,
+    });
+    let enemy = durable_enemy(&mut app, Vec3::new(250.0, 0.0, 0.0));
+    app.world_mut().write_message(DamageEvent {
+        target: enemy,
+        amount: 1000,
+        source: None,
+    });
+    step(&mut app, 3);
+    assert_eq!(app.world().get::<Health>(player).unwrap().current, 90);
+    assert_eq!(count::<ExperienceOrb>(&mut app), 0);
+}
+
+#[cfg(feature = "dev-tools")]
+#[test]
+fn circle_lab_pauses_applies_builds_spawns_targets_and_grants_a_real_level() {
+    use dev_tools::{DebugAction, DebugSession};
+    let mut app = game();
+    let player = player(&mut app);
+    key(&mut app, KeyCode::F1);
+    step(&mut app, 2);
+    assert_eq!(state(&app), GameState::DebugTools);
+    let elapsed = app.world().resource::<Time<Virtual>>().elapsed();
+    step(&mut app, 20);
+    assert_eq!(app.world().resource::<Time<Virtual>>().elapsed(), elapsed);
+    {
+        let mut session = app.world_mut().resource_mut::<DebugSession>();
+        session.waves = false;
+        session.invulnerable = true;
+        session.actions = vec![
+            DebugAction::ClearArena,
+            DebugAction::ApplyBuild(vec![PatternType::Binding, PatternType::Manifestation]),
+            DebugAction::SpawnTargets { moving: false },
+        ];
+    }
+    step(&mut app, 1);
+    assert_eq!(count::<Enemy>(&mut app), 8);
+    assert!(app
+        .world_mut()
+        .query::<&Enemy>()
+        .iter(app.world())
+        .all(|e| e.experience_value == 0));
+    assert_eq!(
+        app.world_mut()
+            .query::<&MagickCircle>()
+            .single(app.world())
+            .unwrap()
+            .patterns,
+        vec![PatternType::Binding, PatternType::Manifestation]
+    );
+    app.world_mut()
+        .resource_mut::<DebugSession>()
+        .actions
+        .push(DebugAction::Resume);
+    step(&mut app, 3);
+    assert_eq!(state(&app), GameState::Playing);
+    assert_eq!(count::<weapons::Attack>(&mut app), 2);
+    app.world_mut().write_message(DamageEvent {
+        target: player,
+        amount: 9999,
+        source: None,
+    });
+    step(&mut app, 1);
+    assert_eq!(app.world().get::<Health>(player).unwrap().current, 100);
+    step(&mut app, 150);
+    assert_eq!(count::<Enemy>(&mut app), 8, "natural spawns disabled");
+    key(&mut app, KeyCode::F1);
+    step(&mut app, 2);
+    app.world_mut().resource_mut::<DebugSession>().actions =
+        vec![DebugAction::ClearArena, DebugAction::GrantLevel];
+    step(&mut app, 4);
+    assert_eq!(count::<Enemy>(&mut app), 0);
+    assert_eq!(count::<ExperienceOrb>(&mut app), 0);
+    assert_eq!(app.world().get::<Experience>(player).unwrap().level, 2);
+    assert_eq!(state(&app), GameState::LevelUp);
+    assert_eq!(count::<MenuRoot>(&mut app), 1);
+}
+
 #[test]
 fn binding_roots_then_expires_and_protection_applies_before_damage() {
     let mut app = game();
@@ -114,7 +392,8 @@ fn binding_roots_then_expires_and_protection_applies_before_damage() {
     app.world_mut()
         .get_mut::<weapons::AreaEffect>(binding)
         .unwrap()
-        .last_tick = -1.0;
+        .timer
+        .set_elapsed(Duration::from_secs_f32(0.5));
     app.world_mut()
         .entity_mut(player)
         .remove::<weapons::ProtectionBuff>();
@@ -311,7 +590,8 @@ fn overlaps_persist_between_staggered_damage_ticks_and_clear_on_exit() {
     app.world_mut()
         .get_mut::<weapons::AreaEffect>(second)
         .unwrap()
-        .last_tick = 0.25;
+        .timer
+        .set_elapsed(Duration::from_secs_f32(0.25));
     step(&mut app, 5);
     for _ in 0..45 {
         step(&mut app, 1);
@@ -386,13 +666,20 @@ fn each_pattern_keeps_its_shape_effect_and_recursive_cleanup() {
             .world()
             .get::<bevy_prototype_lyon::entity::Shape>(attack)
             .is_some());
-        step(&mut app, 40);
+        step(
+            &mut app,
+            if pattern == PatternType::Manifestation {
+                80
+            } else {
+                40
+            },
+        );
         match pattern {
             PatternType::Banishment => {
                 assert!(app.world().get::<Health>(enemy).unwrap().current <= 990)
             }
             PatternType::Manifestation => {
-                assert!(app.world().get::<Health>(enemy).unwrap().current <= 985)
+                assert_eq!(app.world().get::<Health>(enemy).unwrap().current, 970)
             }
             PatternType::Binding => {
                 assert!(app.world().get::<weapons::BindingEffect>(enemy).is_some())
@@ -497,7 +784,10 @@ fn death_emits_one_orb_and_one_kill() {
         .query::<&ExperienceOrb>()
         .single(app.world())
         .unwrap();
-    assert_eq!(orb.value, 66);
+    assert_eq!(
+        orb.value, 1,
+        "gems preserve the configured reward without a debug multiplier"
+    );
 
     let orb_entity = app
         .world_mut()
@@ -511,7 +801,7 @@ fn death_emits_one_orb_and_one_kill() {
     step(&mut app, 8);
     assert_eq!(count::<ExperienceOrb>(&mut app), 0);
     let player = player(&mut app);
-    assert_eq!(app.world().get::<Experience>(player).unwrap().current, 66);
+    assert_eq!(app.world().get::<Experience>(player).unwrap().current, 1);
 }
 
 #[test]

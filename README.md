@@ -23,6 +23,17 @@ those systems are introduced.
 
 ## Controls
 
+For the optional **Circle Lab** debug menu, run:
+
+```sh
+cargo run --locked --features dev-tools
+```
+
+Press **F1 while playing** to pause and edit circle builds, spawn targets, toggle
+invulnerability/natural spawns, or grant a level. Apply the build, then resume with
+F1, Escape, or the Resume button. See [composition and playtesting](design/CIRCLE-COMPOSITION.md)
+for effect rules and the available controls.
+
 - **WASD:** move.
 - **Escape:** pause/resume.
 - **Up/Down or W/S:** navigate menus.
@@ -39,6 +50,7 @@ for the larger game concept.
 cargo fmt -- --check
 cargo check --locked
 cargo test --locked
+cargo test --locked --features dev-tools
 ```
 
 The tests run the game plugins and Rapier without a window/GPU. They cover

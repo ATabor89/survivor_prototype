@@ -41,7 +41,7 @@ pub fn death_system(
         death_events.write(EntityDeathEvent {
             entity,
             position: transform.map_or(Vec2::ZERO, |t| t.translation.truncate()),
-            exp_value: enemy.map(|e| e.experience_value * 66),
+            exp_value: enemy.map(|e| e.experience_value),
         });
 
         // Mark for despawn after death processing

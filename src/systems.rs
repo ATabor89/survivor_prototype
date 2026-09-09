@@ -15,23 +15,23 @@ pub fn load_textures(
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     // Load the sprite sheet images
-    let player_texture: Handle<Image> = asset_server.load("sprites/player.png");
-    let enemy_texture: Handle<Image> = asset_server.load("sprites/enemies.png");
+    let player_texture: Handle<Image> = asset_server.load("sprites/occult-characters-v1.png");
+    let enemy_texture = player_texture.clone();
     let projectile_texture: Handle<Image> = asset_server.load("sprites/projectiles.png");
 
     // Create texture atlas layouts
     let player_layout = TextureAtlasLayout::from_grid(
-        UVec2::new(32, 32), // Sprite size
-        1,
-        1,    // Grid size (1x1 for now)
+        UVec2::new(887, 887), // Two square cells in the generated 1774x887 atlas.
+        2,
+        1,    // One row: player at cell 0, enemy at cell 1.
         None, // Padding
         None, // Offset
     );
 
     let enemy_layout = TextureAtlasLayout::from_grid(
-        UVec2::new(32, 32), // Sprite size
+        UVec2::new(887, 887),
         2,
-        1,    // Grid size (2 types of enemies)
+        1,    // Shared character atlas; enemies use cell 1.
         None, // Padding
         None, // Offset
     );
@@ -123,6 +123,11 @@ pub fn handle_pause_state(
 ) {
     if let Ok(mut rapier_config) = config_query.single_mut() {
         match game_state.get() {
+            #[cfg(feature = "dev-tools")]
+            GameState::DebugTools => {
+                rapier_config.physics_pipeline_active = false;
+                time.pause();
+            }
             GameState::Playing => {
                 // Resume physics and time
                 rapier_config.physics_pipeline_active = true;
@@ -151,7 +156,7 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         Luck::default(),
         Sprite {
             image: game_textures.player.clone(),
-            custom_size: Some(Vec2::new(32.0, 32.0)),
+            custom_size: Some(Vec2::splat(48.0)),
             texture_atlas: Some(TextureAtlas {
                 layout: game_textures.player_layout.clone(),
                 index: 0,
@@ -183,7 +188,12 @@ pub fn spawn_enemies(
     wave_config: Res<WaveConfig>,
     enemy_query: Query<&Enemy>,
     player_query: Query<&Transform, With<Player>>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
+    #[cfg(feature = "dev-tools")]
+    if !debug.waves {
+        return;
+    }
     if timer.0.tick(time.delta()).just_finished()
         && enemy_query.iter().count() < wave_config.max_enemies as usize
     {
@@ -202,19 +212,17 @@ pub fn spawn_enemies(
                 0.0,
             );
 
-        let sprite_index = if rand::random::<f32>() > 0.5 { 0 } else { 1 };
-
         commands.spawn((
             Enemy {
                 speed: 100.0,
-                experience_value: 50,
+                experience_value: 10, // Ordinary reward; dev tools provide instant level-ups.
             },
             Sprite {
                 image: game_textures.enemies.clone(),
-                custom_size: Some(Vec2::new(32.0, 32.0)),
+                custom_size: Some(Vec2::splat(48.0)),
                 texture_atlas: Some(TextureAtlas {
                     layout: game_textures.enemies_layout.clone(),
-                    index: sprite_index,
+                    index: 1,
                 }),
                 ..default()
             },
@@ -235,7 +243,8 @@ pub fn enemy_movement(
 ) {
     if let Ok(player_transform) = player_query.single() {
         for (entity, transform, enemy, mut velocity) in enemy_query.iter_mut() {
-            let direction = (player_transform.translation - transform.translation).normalize();
+            let direction =
+                (player_transform.translation - transform.translation).normalize_or_zero();
             let base_velocity = direction.truncate() * enemy.speed * 0.8;
 
             // Check if enemy is under binding effect
@@ -250,14 +259,8 @@ pub fn enemy_movement(
 
             // Check if enemy is being pulled by an Invocation circle
             if let Ok(pull) = pull_query.get(entity) {
-                let enemy_pos = transform.translation.truncate();
-                let to_center = pull.pull_target - enemy_pos;
-                let dist = to_center.length();
-                if dist > 1.0 {
-                    // Pull toward center; override chase velocity
-                    let pull_dir = to_center / dist;
-                    final_velocity = pull_dir * pull.strength;
-                }
+                // Forced movement overrides pursuit, including cancellation to zero.
+                final_velocity = pull.velocity;
             }
 
             velocity.linear = final_velocity;

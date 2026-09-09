@@ -12,14 +12,16 @@ use crate::weapons::weapon_upgrade::{
     apply_common_weapon_upgrades, update_weapon_level, WeaponUpgradeConfig,
 };
 use crate::GameplaySets;
-use bevy::platform::collections::HashSet;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::fmt::Formatter;
 use std::time::Duration;
 use strum::EnumIter;
 
+pub mod effects;
 pub mod magick_circle;
+use effects::{CircleEffect, PULL_SPEED_CAP, ROOT_LINGER_SECONDS};
 pub mod overlap;
 pub mod weapon_upgrade;
 
@@ -56,6 +58,7 @@ impl Plugin for WeaponPlugin {
                     update_weapon_positions,
                     invocation_cleanup_system,
                     area_effect_system,
+                    magick_circle::animate_manifestation_charge,
                     overlap_detection_system,
                     handle_binding_events,
                     binding_expiration_system,
@@ -238,9 +241,16 @@ pub struct PiercingAttack {
 
 #[derive(Component)]
 pub struct AreaEffect {
-    pub duration: f32,
-    pub tick_rate: f32,
-    pub last_tick: f32,
+    /// Spawn-relative cadence: new circles always wait for their first effect.
+    pub timer: Timer,
+}
+
+impl AreaEffect {
+    pub fn new(pattern: PatternType) -> Self {
+        Self {
+            timer: Timer::from_seconds(pattern.effect().interval(), TimerMode::Repeating),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -423,7 +433,7 @@ pub fn area_effect_system(
     mut damage_events: MessageWriter<DamageEvent>,
     mut binding_events: MessageWriter<BindingEvent>,
     context_query: ReadRapierContext,
-    enemy_query: Query<Entity, (With<Enemy>, Without<MarkedForDeath>)>,
+    enemy_query: Query<&Transform, (With<Enemy>, Without<MarkedForDeath>)>,
     mut enemy_circle_hits: ResMut<EnemyCircleHits>,
 ) {
     let rapier_context = context_query
@@ -432,14 +442,15 @@ pub fn area_effect_system(
 
     // Clear previous frame's data; this resource is also read by overlap_detection_system
     enemy_circle_hits.hits.clear();
-    let mut ticking_circles: HashSet<Entity> = HashSet::default();
+    let mut ticking_circles: HashMap<Entity, u32> = HashMap::default();
 
     // First pass: collect all circle effects affecting each enemy
     for (circle_entity, mut area_effect, _, _, pattern, circle_transform) in effect_query.iter_mut()
     {
-        if time.elapsed_secs() - area_effect.last_tick >= area_effect.tick_rate {
-            area_effect.last_tick = time.elapsed_secs();
-            ticking_circles.insert(circle_entity);
+        area_effect.timer.tick(time.delta());
+        let ticks = area_effect.timer.times_finished_this_tick();
+        if ticks > 0 {
+            ticking_circles.insert(circle_entity, ticks);
         }
         let circle_pos = circle_transform.translation.truncate();
 
@@ -468,54 +479,53 @@ pub fn area_effect_system(
     }
 
     // Second pass: apply per-pattern effects for each enemy
-    for (enemy_entity, affecting_circles) in enemy_circle_hits.hits.iter() {
+    for (enemy_entity, affecting_circles) in enemy_circle_hits.hits.iter_mut() {
+        // Stable accumulation order, independent of query/archetype iteration.
+        affecting_circles.sort_unstable_by_key(|(entity, _, _)| *entity);
+        let enemy_pos = enemy_query
+            .get(*enemy_entity)
+            .unwrap()
+            .translation
+            .truncate();
+        let mut pull_velocity = Vec2::ZERO;
+        let mut has_pull = false;
         for (circle_entity, pattern, circle_pos) in affecting_circles {
-            // Pulling is continuous while inside a circle, independent of damage ticks.
-            if *pattern == PatternType::Invocation {
-                commands.entity(*enemy_entity).insert(InvocationPull {
-                    pull_target: *circle_pos,
-                    strength: 120.0,
-                });
+            if let CircleEffect::Pull { speed } = pattern.effect() {
+                let offset = *circle_pos - enemy_pos;
+                // Slow near the center to avoid overshooting and oscillating.
+                pull_velocity += offset.normalize_or_zero()
+                    * speed.min(offset.length() / time.delta_secs().max(0.0001));
+                has_pull = true;
                 continue;
             }
-            if !ticking_circles.contains(circle_entity) {
+            let Some(&ticks) = ticking_circles.get(circle_entity) else {
                 continue;
-            }
-            match pattern {
-                PatternType::Banishment => {
+            };
+            match pattern.effect() {
+                CircleEffect::Damage { multiplier, .. } => {
                     if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {
                         damage_events.write(DamageEvent {
                             target: *enemy_entity,
-                            amount: damage.amount,
+                            amount: (damage.amount as f32 * multiplier).round() as i32
+                                * ticks as i32,
                             source: Some(*circle_entity),
                         });
                     }
                 }
-                PatternType::Binding => {
+                CircleEffect::Root { strength } => {
                     binding_events.write(BindingEvent {
                         target: *enemy_entity,
-                        strength: 1.0,
+                        strength,
                         source: *circle_entity,
                     });
                 }
-                PatternType::Invocation => {
-                    // Applied continuously above.
-                }
-                PatternType::Manifestation => {
-                    // Periodic damage burst — deals 1.5x the circle's base damage
-                    if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {
-                        damage_events.write(DamageEvent {
-                            target: *enemy_entity,
-                            amount: (damage.amount as f32 * 1.5) as i32,
-                            source: Some(*circle_entity),
-                        });
-                    }
-                }
-                PatternType::Protection => {
-                    // Protection effect on player is handled by protection_system;
-                    // no enemy-side effect needed here.
-                }
+                CircleEffect::Pull { .. } | CircleEffect::Ward { .. } => {}
             }
+        }
+        if has_pull {
+            commands.entity(*enemy_entity).insert(InvocationPull {
+                velocity: pull_velocity.clamp_length_max(PULL_SPEED_CAP),
+            });
         }
     }
 }
@@ -530,15 +540,31 @@ pub struct BindingEffect {
 pub fn handle_binding_events(
     mut commands: Commands,
     mut binding_events: MessageReader<BindingEvent>,
+    mut bindings: Query<&mut BindingEffect>,
 ) {
+    let mut roots: HashMap<Entity, (f32, Entity)> = HashMap::default();
     for event in binding_events.read() {
-        commands.entity(event.target).insert(BindingEffect {
-            strength: event.strength,
-            source: event.source,
-            // Slightly longer than area_effect tick_rate (0.5s) so the effect
-            // lingers briefly after leaving the circle, then wears off.
-            timer: Timer::from_seconds(1.0, TimerMode::Once),
-        });
+        let root = roots
+            .entry(event.target)
+            .or_insert((event.strength, event.source));
+        if event.strength > root.0 || (event.strength == root.0 && event.source < root.1) {
+            *root = (event.strength, event.source);
+        }
+    }
+    for (target, (strength, source)) in roots {
+        if let Ok(mut binding) = bindings.get_mut(target) {
+            if strength >= binding.strength {
+                binding.strength = strength;
+                binding.source = source;
+            }
+            binding.timer.reset();
+        } else {
+            commands.entity(target).insert(BindingEffect {
+                strength,
+                source,
+                timer: Timer::from_seconds(ROOT_LINGER_SECONDS, TimerMode::Once),
+            });
+        }
     }
 }
 
@@ -562,8 +588,7 @@ pub fn binding_expiration_system(
 /// while the enemy remains inside the circle.
 #[derive(Component)]
 pub struct InvocationPull {
-    pub pull_target: Vec2,
-    pub strength: f32,
+    pub velocity: Vec2,
 }
 
 /// Clears all `InvocationPull` components so stale pulls are removed.
@@ -602,12 +627,15 @@ pub fn protection_system(
         .single()
         .expect("Expected one initialized Rapier context");
 
-    let mut inside_protection = false;
+    let mut reduction: f32 = 0.0;
 
     for (circle_entity, pattern) in protection_circles.iter() {
-        if *pattern != PatternType::Protection {
+        let CircleEffect::Ward {
+            reduction: circle_reduction,
+        } = pattern.effect()
+        else {
             continue;
-        }
+        };
         for (collider1, collider2, intersecting) in
             rapier_context.intersection_pairs_with(circle_entity)
         {
@@ -620,18 +648,15 @@ pub fn protection_system(
                 collider1
             };
             if other == player_entity {
-                inside_protection = true;
+                reduction = reduction.max(circle_reduction);
                 break;
             }
         }
-        if inside_protection {
-            break;
-        }
     }
 
-    if inside_protection {
+    if reduction > 0.0 {
         commands.entity(player_entity).insert(ProtectionBuff {
-            damage_reduction: 0.5, // 50% damage reduction
+            damage_reduction: reduction,
         });
     } else {
         commands.entity(player_entity).remove::<ProtectionBuff>();
