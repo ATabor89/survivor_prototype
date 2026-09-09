@@ -42,7 +42,7 @@ pub fn spawn_ui(mut commands: Commands) {
 
                         ..default()
                     },
-                    BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                    BorderColor::all(Color::srgb(0.7, 0.7, 0.7)),
                     BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
                 ))
                 .with_children(|parent| {

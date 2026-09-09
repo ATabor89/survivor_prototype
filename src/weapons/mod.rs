@@ -32,9 +32,9 @@ impl Plugin for WeaponPlugin {
             .init_resource::<EnemyCircleHits>()
             .init_resource::<ActiveOverlaps>()
             .insert_resource(WeaponPickupCounter(0))
-            .add_event::<AddWeaponEvent>()
-            .add_event::<AreaEffectEvent>()
-            .add_event::<BindingEvent>()
+            .add_message::<AddWeaponEvent>()
+            .add_message::<AreaEffectEvent>()
+            .add_message::<BindingEvent>()
             .add_systems(
                 Update,
                 (
@@ -85,14 +85,14 @@ pub struct WeaponPickupCounter(u8);
 pub struct StartingWeapon(pub WeaponType);
 
 // Event for when a new weapon should be added
-#[derive(Event)]
+#[derive(Message)]
 pub struct AddWeaponEvent {
     pub player: Entity,
     pub weapon_type: WeaponType,
 }
 
 // Different types of area effects
-#[derive(Event)]
+#[derive(Message)]
 pub enum AreaEffectEvent {
     Damage(DamageEvent),
     Binding(BindingEvent),
@@ -100,7 +100,7 @@ pub enum AreaEffectEvent {
     // etc.
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct BindingEvent {
     pub target: Entity,
     pub strength: f32, // How strongly they're held
@@ -110,7 +110,7 @@ pub struct BindingEvent {
 // This runs once on player spawn and handles the starting weapon
 pub fn setup_player_inventory(
     query: Query<(Entity, &StartingWeapon), Added<Player>>,
-    mut add_weapon_event: EventWriter<AddWeaponEvent>,
+    mut add_weapon_event: MessageWriter<AddWeaponEvent>,
 ) {
     for (player_entity, starting_weapon) in query.iter() {
         add_weapon_event.write(AddWeaponEvent {
@@ -123,7 +123,7 @@ pub fn setup_player_inventory(
 // This system only runs when new weapons are added
 pub fn handle_new_weapons(
     mut commands: Commands,
-    mut events: EventReader<AddWeaponEvent>,
+    mut events: MessageReader<AddWeaponEvent>,
     mut weapon_pickup_counter: ResMut<WeaponPickupCounter>
 ) {
     for event in events.read() {
@@ -406,8 +406,8 @@ pub fn area_effect_system(
         (Entity, &mut AreaEffect, &Damage, &Area, &PatternType, &Transform),
         With<Attack>,
     >,
-    mut damage_events: EventWriter<DamageEvent>,
-    mut binding_events: EventWriter<BindingEvent>,
+    mut damage_events: MessageWriter<DamageEvent>,
+    mut binding_events: MessageWriter<BindingEvent>,
     context_query: ReadRapierContext,
     enemy_query: Query<Entity, (With<Enemy>, Without<MarkedForDeath>)>,
     mut enemy_circle_hits: ResMut<EnemyCircleHits>,
@@ -506,7 +506,7 @@ pub struct BindingEffect {
 
 pub fn handle_binding_events(
     mut commands: Commands,
-    mut binding_events: EventReader<BindingEvent>,
+    mut binding_events: MessageReader<BindingEvent>,
 ) {
     for event in binding_events.read() {
         commands.entity(event.target).insert(BindingEffect {
@@ -528,7 +528,7 @@ pub fn binding_expiration_system(
 ) {
     for (entity, mut binding) in query.iter_mut() {
         binding.timer.tick(time.delta());
-        if binding.timer.finished() {
+        if binding.timer.is_finished() {
             commands.entity(entity).remove::<BindingEffect>();
         }
     }
@@ -623,7 +623,7 @@ pub fn attack_lifetime_system(
 ) {
     for (entity, mut lifetime) in query.iter_mut() {
         lifetime.timer.tick(time.delta());
-        if lifetime.timer.finished() {
+        if lifetime.timer.is_finished() {
             // First check if the entity still exists
             if commands.get_entity(entity).is_ok() {
                 commands.entity(entity).insert(MarkedForDeath);

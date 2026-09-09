@@ -77,7 +77,7 @@ pub fn check_level_up(
     }
 }
 
-fn spawn_experience_orbs(mut commands: Commands, mut death_events: EventReader<EntityDeathEvent>) {
+fn spawn_experience_orbs(mut commands: Commands, mut death_events: MessageReader<EntityDeathEvent>) {
     for event in death_events.read() {
         if let Some(exp_value) = event.exp_value {
             commands.spawn((
@@ -160,7 +160,7 @@ fn collect_experience_orbs(
     mut commands: Commands,
     mut player_query: Query<(Entity, &mut Experience), With<Player>>,
     orb_query: Query<(Entity, &ExperienceOrb), Without<MarkedForDespawn>>,
-    mut collision_events: EventReader<CollisionEvent>,
+    mut collision_events: MessageReader<CollisionEvent>,
 ) {
     let Ok((player_entity, mut player_exp)) = player_query.single_mut() else {
         return;

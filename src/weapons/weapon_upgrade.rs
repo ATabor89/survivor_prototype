@@ -46,7 +46,7 @@ pub struct WeaponUpgradeData {
 
 // A system dedicated solely to increasing the level of the weapon in order to prevent multiple level updates from different upgrade systems
 pub fn update_weapon_level(
-    mut events: EventReader<WeaponUpgradeConfirmedEvent>,
+    mut events: MessageReader<WeaponUpgradeConfirmedEvent>,
     mut weapon_query: Query<&mut WeaponMeta>,
 ) {
     for event in events.read() {
@@ -59,7 +59,7 @@ pub fn update_weapon_level(
 }
 
 pub fn apply_common_weapon_upgrades(
-    mut upgrade_events: EventReader<WeaponUpgradeConfirmedEvent>,
+    mut upgrade_events: MessageReader<WeaponUpgradeConfirmedEvent>,
     mut weapon_query: Query<(
         &mut WeaponDamage,
         &mut WeaponArea,

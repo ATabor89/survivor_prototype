@@ -286,7 +286,7 @@ pub fn spawn_magick_circle_attack(
 }
 
 pub fn apply_magick_circle_weapon_upgrades(
-    mut upgrade_events: EventReader<WeaponUpgradeConfirmedEvent>,
+    mut upgrade_events: MessageReader<WeaponUpgradeConfirmedEvent>,
     mut weapon_query: Query<(&mut MagickCircle, &WeaponMeta)>,
 ) {
     for upgrade_event in upgrade_events.read() {

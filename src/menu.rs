@@ -16,7 +16,7 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<WeaponUpgradeConfirmedEvent>()
+        app.add_message::<WeaponUpgradeConfirmedEvent>()
             .configure_sets(
                 Update,
                 (
@@ -99,13 +99,13 @@ pub struct UpgradeChoice {
     pub rarity: Rarity,
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct WeaponUpgradeConfirmedEvent {
     pub weapon_type: WeaponType,
     pub upgrade_spec: WeaponUpgradeSpec,
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct GenericUpgradeConfirmedEvent {
     pub generic_upgrade_type: GenericUpgrade,
 }
@@ -174,7 +174,7 @@ pub fn spawn_level_up_menu(
                         border: UiRect::all(Val::Px(2.0)),
                         ..default()
                     },
-                    BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+                    BorderColor::all(Color::srgb(0.7, 0.7, 0.7)),
                     BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
                 ))
                 .with_children(|parent| {
@@ -428,7 +428,7 @@ pub fn spawn_menu_container(
                 border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            BorderColor(Color::srgb(0.7, 0.7, 0.7)),
+            BorderColor::all(Color::srgb(0.7, 0.7, 0.7)),
             BackgroundColor(Color::srgb(0.1, 0.1, 0.1)),
         ))
         .with_children(|parent| {
@@ -512,8 +512,8 @@ pub fn handle_upgrade_selection_and_confirmation(
     menu_query: Query<(Entity, &MenuType)>,
     menu_items: Query<(&MenuItem, &MenuActionComponent, &Interaction)>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut weapon_upgrade_events: EventWriter<WeaponUpgradeConfirmedEvent>,
-    mut generic_upgrade_events: EventWriter<GenericUpgradeConfirmedEvent>,
+    mut weapon_upgrade_events: MessageWriter<WeaponUpgradeConfirmedEvent>,
+    mut generic_upgrade_events: MessageWriter<GenericUpgradeConfirmedEvent>,
 ) {
     // Only process for level up menu
     if !menu_query
@@ -601,7 +601,7 @@ pub fn handle_pattern_select_menu(
     menu_query: Query<(Entity, &MenuType)>,
     buttons: Query<(&MenuItem, &MenuActionComponent, &Interaction), With<Button>>,
     mut pending_add_circle: Option<ResMut<PendingAddCircleUpgrade>>,
-    mut weapon_upgrade_events: EventWriter<WeaponUpgradeConfirmedEvent>,
+    mut weapon_upgrade_events: MessageWriter<WeaponUpgradeConfirmedEvent>,
     mut next_state: ResMut<NextState<GameState>>,
     mut was_active_last_frame: Local<bool>,
 ) {

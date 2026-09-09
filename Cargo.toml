@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.16"
-bevy_rapier2d = { version = "0.30", features = ["debug-render-2d"] }
-bevy_prototype_lyon = "0.14"
+bevy = "0.17"
+bevy_rapier2d = { version = "0.32", features = ["debug-render-2d"] }
+bevy_prototype_lyon = "0.15"
 rand = "0.8.5"
 strum = "0.26.3"
 strum_macros = "0.26.4"

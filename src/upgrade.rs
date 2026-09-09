@@ -14,7 +14,7 @@ use rand::prelude::*;
 use std::cmp::Ordering;
 
 pub fn handle_generic_upgrade(
-    mut upgrade_events: EventReader<GenericUpgradeConfirmedEvent>,
+    mut upgrade_events: MessageReader<GenericUpgradeConfirmedEvent>,
     mut player_query: Query<&mut Health, With<Player>>,
 ) {
     for generic_upgrade_event in upgrade_events.read() {
@@ -216,7 +216,7 @@ pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeCh
     parent
         .spawn((
             Button { ..default() },
-            BorderColor(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
+            BorderColor::all(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
             BackgroundColor(if is_first {
                 Color::srgb(0.3, 0.3, 0.4)
             } else {

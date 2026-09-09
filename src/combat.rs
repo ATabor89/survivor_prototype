@@ -3,7 +3,7 @@ use crate::death::MarkedForDeath;
 use crate::weapons::ProtectionBuff;
 use bevy::prelude::*;
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct DamageEvent {
     pub target: Entity,
     pub amount: i32,
@@ -43,7 +43,7 @@ impl Default for LastDamageTime {
 pub fn handle_damage(
     time: Res<Time<Virtual>>,
     mut commands: Commands,
-    mut damage_events: EventReader<DamageEvent>,
+    mut damage_events: MessageReader<DamageEvent>,
     mut health_query: Query<&mut Health>,
     mut cooldown_query: Query<&mut DamageCooldown>,
     protection_query: Query<&ProtectionBuff>,

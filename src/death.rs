@@ -14,7 +14,7 @@ pub fn death_system(
     mut game_stats: ResMut<GameStats>,
     player_query: Query<(Entity, &Health), With<Player>>,
     marked_entities: Query<(Entity, Option<&Transform>, Option<&Enemy>), With<MarkedForDeath>>,
-    mut death_events: EventWriter<EntityDeathEvent>,
+    mut death_events: MessageWriter<EntityDeathEvent>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // Check player death first

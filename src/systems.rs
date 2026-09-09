@@ -61,7 +61,7 @@ pub fn load_textures(
     });
 }
 
-pub fn quit_game(mut app_exit_events: EventWriter<AppExit>) {
+pub fn quit_game(mut app_exit_events: MessageWriter<AppExit>) {
     info!("quit_game system called");
     app_exit_events.write(AppExit::Success);
 }

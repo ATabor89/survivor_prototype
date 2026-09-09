@@ -150,7 +150,7 @@ pub fn handle_player_enemy_collision(
         ),
     >,
     damage_sensor_query: Query<(Entity, &ChildOf), With<DamageSensor>>,
-    mut damage_events: EventWriter<DamageEvent>,
+    mut damage_events: MessageWriter<DamageEvent>,
 ) {
     // Get player entity and their damage sensor
     let (player_entity, sensor_entity) = if let Ok((player_entity, _)) = player_query.single() {

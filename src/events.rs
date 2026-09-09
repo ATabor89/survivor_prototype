@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct EntityDeathEvent {
     pub entity: Entity,
     pub position: Vec2,

@@ -55,9 +55,9 @@ impl Plugin for SurvivorsGamePlugin {
             .init_resource::<WaveConfig>()
             .init_resource::<UpgradePool>()
             // Events
-            .add_event::<DamageEvent>()
-            .add_event::<EntityDeathEvent>()
-            .add_event::<GenericUpgradeConfirmedEvent>()
+            .add_message::<DamageEvent>()
+            .add_message::<EntityDeathEvent>()
+            .add_message::<GenericUpgradeConfirmedEvent>()
             // States
             .insert_state(GameState::Playing)
             // Plugins
