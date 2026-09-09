@@ -263,21 +263,29 @@ fn lethal_damage_wins_over_victory_and_game_over_can_restart() {
 fn waves_escalate_spawn_offscreen_inside_bounds_and_respect_caps() {
     let mut app = game();
     app.world_mut().resource_mut::<GameStats>().time_elapsed = 180.0;
+    let content = app.world().resource::<crate::content::GameContent>();
+    let stage = content.stage(app.world().resource::<crate::content::ActiveStage>());
+    let phase = stage.schedule[waves::phase_index(&stage.schedule, 180.0)].clone();
     app.world_mut()
         .resource_mut::<SpawnTimer>()
         .0
         .set_elapsed(std::time::Duration::from_secs(3));
     step(&mut app, 2);
     assert_eq!(app.world().resource::<WaveConfig>().current_wave, 4);
-    assert_eq!(count::<Enemy>(&mut app), waves::WAVES[3].batch);
+    assert_eq!(
+        count::<Enemy>(&mut app),
+        phase.batch.max(phase.minimum).min(32)
+    );
     let bounds = app.world().resource::<ArenaBounds>().half_size;
     let kinds: Vec<_> = app
         .world_mut()
         .query::<&waves::EnemyKind>()
         .iter(app.world())
-        .copied()
+        .cloned()
         .collect();
-    assert!(kinds.contains(&waves::EnemyKind::Brute));
+    assert!(kinds
+        .iter()
+        .all(|kind| phase.enemies.iter().any(|entry| entry.id == kind.0)));
     for position in app
         .world_mut()
         .query_filtered::<&Transform, With<Enemy>>()
@@ -290,7 +298,7 @@ fn waves_escalate_spawn_offscreen_inside_bounds_and_respect_caps() {
             "spawned in view: {pos}"
         );
     }
-    for _ in count::<Enemy>(&mut app)..waves::WAVES[3].cap {
+    for _ in count::<Enemy>(&mut app)..phase.cap {
         app.world_mut().spawn((
             Enemy {
                 speed: 0.0,
@@ -308,5 +316,5 @@ fn waves_escalate_spawn_offscreen_inside_bounds_and_respect_caps() {
         .0
         .set_elapsed(std::time::Duration::from_secs(3));
     step(&mut app, 1);
-    assert_eq!(count::<Enemy>(&mut app), waves::WAVES[3].cap);
+    assert_eq!(count::<Enemy>(&mut app), phase.cap);
 }

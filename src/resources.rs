@@ -7,6 +7,7 @@ pub enum GameState {
     Settings,
     Playing,
     LevelUp,
+    Treasure,
     Paused,
     #[cfg(feature = "dev-tools")]
     DebugTools,
@@ -20,6 +21,7 @@ pub enum GameState {
 pub struct GameStats {
     pub enemies_killed: u32,
     pub time_elapsed: f32,
+    pub gold: u32,
 }
 
 #[derive(Resource)]

@@ -5116,6 +5116,8 @@ dependencies = [
  "bevy_prototype_lyon",
  "bevy_rapier2d",
  "rand",
+ "ron",
+ "serde",
  "strum",
 ]
 

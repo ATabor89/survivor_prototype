@@ -1,9 +1,10 @@
 # Survivors Prototype
 
 An occult-themed 2D survivors prototype built with Bevy 0.19, Rapier, and Lyon.
-Survive ten minutes in a large, enclosed courtyard. Build a weapon from five
-Magick Circle patterns while collecting experience and facing increasingly dense
-waves. Death and victory both lead to a run summary and a fresh-run option.
+Build a weapon from five Magick Circle patterns while collecting experience,
+breaking props for supplies, and surviving authored enemy phases and boss encounters.
+Three bounded stages offer arena, horizontal, and vertical layouts. Death and
+victory both lead to a run summary and a fresh-run option.
 
 ## Build and run
 
@@ -22,42 +23,77 @@ The first build takes longer because development dependencies are optimized.
 Bevy's 2D and UI feature groups are enabled; audio and 3D can be enabled when
 those systems are introduced.
 
+The game launches in a resizable **1920 × 1080** window. The camera follows the
+player rather than zooming out to fit the whole stage.
+
 ## Controls
 
-For the optional **Circle Lab** debug menu, run:
+- **WASD:** move.
+- **Escape:** pause/resume.
+- **Up/Down or W/S:** navigate menus.
+- **Enter or Space:** confirm a menu selection; reveal/claim treasure rewards.
+- **Mouse click:** select a menu option.
+- **Controller left stick:** move; **D-pad Up/Down:** navigate menus;
+  **South face button** (A/Cross): confirm; **Start:** pause/resume.
+
+The game starts directly in the Sealed Courtyard. Pause, level-up selection,
+treasure reveals, and the paused Debug menu freeze the run clock. Chests reveal
+weapon upgrades before they are claimed; confirm again to claim and resume.
+
+Choose **Play again** after death or victory to reset the run, including XP,
+weapon upgrades, enemies, gems, and debug overrides. Controller input has automated
+coverage; a physical controller has not been verified. The Debug menu uses
+keyboard/mouse.
+
+## Debug menu
 
 ```sh
 cargo run --locked --features dev-tools
 ```
 
-Press **F1 while playing** to pause and edit circle builds, spawn targets, toggle
-invulnerability/natural spawns, grant a level, skip to the next wave, or test the
-victory flow. Apply the build, then resume with
-F1, Escape, or the Resume button. See [composition and playtesting](design/CIRCLE-COMPOSITION.md)
-for effect rules and the available controls.
+**F1 while playing** opens the Debug menu, formerly Circle Lab. **F2** opens its
+Weapons tab directly. New openings pause the simulation; uncheck **Pause simulation**
+to keep playing with the menu visible. F1, Escape, Start, or **Close menu** closes
+the overlay. Text-widget focus blocks WASD while the live menu needs keyboard input.
+Level-up, treasure, and result screens take priority over the debug overlay.
 
-- **WASD:** move.
-- **Escape:** pause/resume.
-- **Up/Down or W/S:** navigate menus.
-- **Enter or Space:** confirm the selected upgrade or pattern.
-- **Mouse click:** select a menu option.
-- **Controller left stick:** move; **D-pad Up/Down:** navigate menus;
-  **South face button** (A/Cross): confirm; **Start:** pause/resume.
+| Tab | Controls |
+| --- | --- |
+| Run | Heal, grant a level, toggle natural spawns/invulnerability, skip a minute or the next authored phase, test victory, and trigger named encounters |
+| Weapons | Circle patterns and presets, apply builds, spawn stationary/moving test targets |
+| World | Select a stage and restart, spawn test chests/healing/urns, show Rapier colliders, clear the arena |
 
-The game starts directly in play. The camera follows the player through a
-3,200 × 2,400 courtyard; Rapier walls contain players and enemies. Waves change
-each minute, introducing Runners in minute two and Brutes in minute four.
-Pause, level-up selection, and Circle Lab freeze the run clock.
+Encounter requests made while paused remain queued until the simulation resumes.
+**Next phase** uses the stage's authored timestamps; **Next wave** advances a minute
+and stops before the stage's ending. **Test victory** uses that stage's duration.
+Choosing a stage starts a fresh run. **Clear arena** preserves the current build
+and progression. See [circle composition](design/CIRCLE-COMPOSITION.md) for effect rules.
 
-Choose **Play again** after death or victory to reset the run, including XP,
-weapon upgrades, enemies, gems, and debug overrides. Controller input has automated
-coverage; a physical controller has not been verified. Circle Lab remains a
-keyboard/mouse tool.
+## Stages and content
 
-The encounter schedule and XP progression are an initial balance pass. A title
-screen, saves, audio, and persistent progression remain future work. See the
-[systems review](design/SYSTEMS-REVIEW.md) for the current architecture, changes,
-and limitations, and [the design document](design/DESIGN.md) for the larger concept.
+| Stage | Layout | Playable size | Survival time |
+| --- | --- | --- | --- |
+| The Sealed Courtyard | Arena | 3,200 × 2,400 | 10 minutes |
+| The Ash Processional | Horizontal | 12,800 × 560 | 9 minutes |
+| The Bell Descent | Vertical | 960 × 11,200 | 8 minutes |
+
+Rapier handles walls, obstacles, character sliding, and pickup overlaps. Enemy
+phases have authored start times, spawn mixes, population targets, and caps.
+Timed encounters announce themselves before spawning; some include a Warden and
+a temporary ring of enemies. Defeating configured bosses drops a reward chest.
+Breakable props can drop healing or gold, and authored pickups provide landmarks
+worth visiting. Gold is recorded for the current run; there is no persistent shop
+or currency progression yet.
+
+Edit [assets/data/stages.ron](assets/data/stages.ron) and relaunch to change stages,
+enemy definitions, encounter schedules, obstacles, pickups, and breakables without
+editing Rust. Content is validated at startup. See [stage content and playtesting](design/STAGE-CONTENT.md)
+for authoring details and the current verification record.
+
+Encounter schedules and XP progression are an initial balance pass. A title
+screen, saves, audio, and persistent progression remain future work. The
+[systems review](design/SYSTEMS-REVIEW.md) records the earlier refactor baseline;
+[the design document](design/DESIGN.md) preserves the larger concept.
 
 ## Verification
 
@@ -73,9 +109,10 @@ The tests run the game plugins and Rapier without a window/GPU. They cover
 movement and pause, damage/death and XP pickup, circle effects and cleanup,
 overlap membership and unique combinations, continuous Invocation pull and cleanup,
 Binding expiry, Protection damage reduction, keyboard/mouse/controller menu flows,
-physics-backed wall movement, XP collection across pauses, wave progression,
-and run endings/restarts. Rendering and layout also need a visual check after
-engine or UI changes. See the systems review for the final validation record.
+physics-backed wall movement, XP collection across pauses, authored stages and
+encounters, loot/treasure, debug pause/live behavior, and run endings/restarts.
+Rendering and layout also need a visual check after engine or UI changes. See
+the stage-content document for final integrated validation and remaining limits.
 
 ## Migration checkpoints
 

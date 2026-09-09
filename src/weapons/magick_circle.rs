@@ -256,8 +256,13 @@ pub fn spawn_magick_circle_attack(
             Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
             // Protection circles must also detect the kinematic player.
-            ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
-            CollisionGroups::new(Group::GROUP_3, Group::GROUP_1 | Group::GROUP_2),
+            ActiveCollisionTypes::default()
+                | ActiveCollisionTypes::KINEMATIC_STATIC
+                | ActiveCollisionTypes::STATIC_STATIC,
+            CollisionGroups::new(
+                Group::GROUP_3,
+                Group::GROUP_1 | Group::GROUP_2 | crate::loot::BREAKABLE_GROUP,
+            ),
             pattern_type,
         ))
         .id();

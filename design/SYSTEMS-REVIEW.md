@@ -1,5 +1,11 @@
 # Systems review and playable-run baseline
 
+> **Historical baseline:** This records the initial courtyard/run refactor. The
+> subsequent [stage-content pass](STAGE-CONTENT.md) supersedes its single-map,
+> minute-only wave schedule, Circle Lab controls, and future-work list. Current
+> builds include three authored stages, encounters, loot, and the general Debug
+> menu; the original review and its validation remain below as history.
+
 This pass keeps the existing circle-composition rules and automatic weapon placement.
 It addresses concrete state, input, progression, and physics issues, then adds a
 bounded map and a complete ten-minute survival loop. It does not replace Bevy's ECS

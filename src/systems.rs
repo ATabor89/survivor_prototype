@@ -60,6 +60,7 @@ pub fn gameplay_movement_system(
     time: Res<Time>,
     gamepads: Query<&Gamepad>,
     mut query: Query<(&Player, &mut KinematicCharacterController)>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
     // Only process movement in Playing state
     if *game_state.get() != GameState::Playing {
@@ -68,17 +69,21 @@ pub fn gameplay_movement_system(
 
     for (player, mut controller) in query.iter_mut() {
         let mut direction = Vec2::ZERO;
+        #[cfg(feature = "dev-tools")]
+        let keyboard_enabled = !(debug.open && debug.wants_keyboard_input);
+        #[cfg(not(feature = "dev-tools"))]
+        let keyboard_enabled = true;
 
-        if keyboard.pressed(KeyCode::KeyW) {
+        if keyboard_enabled && keyboard.pressed(KeyCode::KeyW) {
             direction.y += 1.0;
         }
-        if keyboard.pressed(KeyCode::KeyS) {
+        if keyboard_enabled && keyboard.pressed(KeyCode::KeyS) {
             direction.y -= 1.0;
         }
-        if keyboard.pressed(KeyCode::KeyA) {
+        if keyboard_enabled && keyboard.pressed(KeyCode::KeyA) {
             direction.x -= 1.0;
         }
-        if keyboard.pressed(KeyCode::KeyD) {
+        if keyboard_enabled && keyboard.pressed(KeyCode::KeyD) {
             direction.x += 1.0;
         }
 
@@ -98,7 +103,12 @@ pub fn universal_input_system(
     gamepads: Query<&Gamepad>,
     game_state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
+    #[cfg(feature = "dev-tools")]
+    if debug.open || debug.consumed_pause_input {
+        return;
+    }
     if keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
@@ -133,6 +143,7 @@ pub fn handle_pause_state(
             }
             GameState::Paused
             | GameState::LevelUp
+            | GameState::Treasure
             | GameState::GameOver
             | GameState::Victory
             | GameState::Restarting => {
@@ -184,7 +195,10 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
 
 pub fn enemy_movement(
     player_query: Query<&Transform, With<Player>>,
-    mut enemy_query: Query<(Entity, &Transform, &Enemy, &mut Velocity)>,
+    mut enemy_query: Query<
+        (Entity, &Transform, &Enemy, &mut Velocity),
+        Without<crate::waves::RingMember>,
+    >,
     binding_query: Query<&BindingEffect>,
     pull_query: Query<&InvocationPull>,
 ) {

@@ -1,11 +1,13 @@
 mod arena;
 mod combat;
 mod components;
+mod content;
 mod death;
 #[cfg(feature = "dev-tools")]
 mod dev_tools;
 mod events;
 mod experience;
+mod loot;
 mod menu;
 mod physics;
 mod resources;
@@ -17,6 +19,14 @@ mod upgrade;
 mod waves;
 mod weapons;
 
+#[cfg(all(test, feature = "dev-tools"))]
+mod debug_regression_tests;
+#[cfg(test)]
+mod encounter_regression_tests;
+#[cfg(test)]
+mod loot_regression_tests;
+#[cfg(test)]
+mod map_regression_tests;
 #[cfg(test)]
 mod menu_regression_tests;
 #[cfg(test)]
@@ -87,6 +97,7 @@ impl Plugin for SurvivorsGamePlugin {
             .add_plugins(ExperiencePlugin)
             .add_plugins(WeaponPlugin)
             .add_plugins((arena::ArenaPlugin, run::RunPlugin, waves::WavesPlugin))
+            .add_plugins(loot::LootPlugin)
             // Startup systems
             .add_systems(Startup, (load_textures, spawn_player.after(load_textures)))
             // Configure system sets
@@ -149,6 +160,7 @@ impl Plugin for SurvivorsGamePlugin {
                     update_game_timer,
                     update_kill_counter,
                     ui::update_run_status,
+                    ui::update_boss_status,
                 )
                     .in_set(GameplaySets::UI)
                     .run_if(in_state(GameState::Playing)),
@@ -184,6 +196,7 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Survivors-Like Prototype".to_string(),
+                    resolution: (1920, 1080).into(),
                     ..Default::default()
                 }),
                 ..Default::default()

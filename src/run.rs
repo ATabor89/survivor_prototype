@@ -6,7 +6,6 @@ use crate::{
 };
 use bevy::prelude::*;
 
-pub const SURVIVAL_SECONDS: f32 = 600.0;
 #[derive(Component)]
 pub struct RunEntity;
 
@@ -31,11 +30,14 @@ fn advance_run(
     mut stats: ResMut<GameStats>,
     player: Query<&Health, With<Player>>,
     mut next: ResMut<NextState<GameState>>,
+    content: Res<crate::content::GameContent>,
+    active: Res<crate::content::ActiveStage>,
 ) {
     // Combat has already run. A lethal frame always wins over victory or XP.
     if player.single().is_ok_and(|health| health.current > 0) {
-        stats.time_elapsed = (stats.time_elapsed + time.delta_secs()).min(SURVIVAL_SECONDS);
-        if stats.time_elapsed >= SURVIVAL_SECONDS {
+        let duration = content.stage(&active).duration;
+        stats.time_elapsed = (stats.time_elapsed + time.delta_secs()).min(duration);
+        if stats.time_elapsed >= duration {
             next.set(GameState::Victory);
         }
     }
@@ -63,6 +65,10 @@ fn reset_run(world: &mut World) {
     *world.resource_mut::<SpawnTimer>() = SpawnTimer::default();
     *world.resource_mut::<WaveConfig>() = WaveConfig::default();
     *world.resource_mut::<crate::waves::WaveDirector>() = crate::waves::WaveDirector::default();
+    world
+        .resource_mut::<Messages<crate::waves::TriggerEncounter>>()
+        .clear();
+    crate::loot::reset_loot(world);
     world
         .resource_mut::<crate::weapons::overlap::EnemyCircleHits>()
         .hits

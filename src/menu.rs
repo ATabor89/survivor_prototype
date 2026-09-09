@@ -601,7 +601,7 @@ fn spawn_victory_menu(mut commands: Commands, stats: Res<GameStats>) {
         &mut commands,
         MenuType::Victory,
         "Victory!",
-        "You survived ten minutes.",
+        "You survived the expedition.",
         &stats,
     );
 }
@@ -615,10 +615,11 @@ fn spawn_run_end_menu(
 ) {
     let seconds = stats.time_elapsed as u32;
     let summary = format!(
-        "Time: {:02}:{:02}   |   Enemies defeated: {}",
+        "Time: {:02}:{:02}   |   Enemies defeated: {}   |   Gold: {}",
         seconds / 60,
         seconds % 60,
-        stats.enemies_killed
+        stats.enemies_killed,
+        stats.gold
     );
     commands
         .spawn((

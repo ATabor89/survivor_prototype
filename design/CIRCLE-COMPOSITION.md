@@ -1,5 +1,12 @@
 # Circle composition and playtesting
 
+> **Current playtest controls:** Circle Lab has become the **Debug menu**. F1
+> opens Run controls; F2 opens Weapons directly. Run/Weapons/World are single-click
+> tabs, and the Pause simulation checkbox permits live testing with the menu open.
+> See [the README](../README.md#debug-menu) and [stage-content guide](STAGE-CONTENT.md)
+> for current controls. The effect rules below still apply; the original Circle Lab
+> implementation and validation are preserved as a historical record.
+
 Circles compose their ordinary effects. There are no named pair bonuses or pair-specific dispatch rules. The player's decisions are primarily build choices; circles retain their automatic positions and three-second lifetime. An Invocation circle pulling an enemy out of another circle is an intentional spatial tradeoff.
 
 ## Effects
@@ -18,7 +25,7 @@ Each damage source contributes independently, including duplicate patterns. Root
 
 `ActiveOverlaps` retains physical circle pairs for diagnostics. Its pattern helpers return unique unordered combinations. Damage and control effects do not depend on those helpers, so deduplication does not suppress damage from duplicate circles.
 
-## Circle Lab
+## Original Circle Lab implementation
 
 Run `cargo run --locked --features dev-tools`, then press **F1 while playing**. The panel pauses virtual time and physics. F1, Escape, or Resume closes it and resumes play. Ordinary pause and level-up menus remain separate.
 

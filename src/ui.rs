@@ -22,6 +22,8 @@ pub struct KillCounter;
 pub struct RunStatus;
 #[derive(Component)]
 pub struct ExperienceStatus;
+#[derive(Component)]
+pub struct BossStatus;
 
 pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
@@ -129,10 +131,12 @@ pub fn spawn_ui(mut commands: Commands) {
                     position_type: PositionType::Absolute,
                     top: Val::Px(48.0),
                     left: Val::Percent(50.0),
-                    margin: UiRect::left(Val::Px(-56.0)),
+                    width: Val::Px(440.0),
+                    margin: UiRect::left(Val::Px(-220.0)),
                     ..default()
                 },
                 RunStatus,
+                TextLayout::justify(Justify::Center),
             ));
             parent.spawn((
                 Text::new("Level 1   0 / 100 XP"),
@@ -148,6 +152,23 @@ pub fn spawn_ui(mut commands: Commands) {
                     ..default()
                 },
                 ExperienceStatus,
+            ));
+            parent.spawn((
+                Text::new(""),
+                BossStatus,
+                TextFont {
+                    font_size: FontSize::Px(20.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.65, 0.35)),
+                TextLayout::justify(Justify::Center),
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(24.0),
+                    left: Val::Percent(25.0),
+                    width: Val::Percent(50.0),
+                    ..default()
+                },
             ));
         });
 }
@@ -176,6 +197,8 @@ pub fn update_game_timer(
 )]
 pub fn update_run_status(
     wave: Res<WaveConfig>,
+    content: Res<crate::content::GameContent>,
+    active: Res<crate::content::ActiveStage>,
     xp: Query<&Experience, With<Player>>,
     mut labels: ParamSet<(
         Query<&mut Text, With<RunStatus>>,
@@ -183,7 +206,13 @@ pub fn update_run_status(
     )>,
 ) {
     if let Ok(mut text) = labels.p0().single_mut() {
-        text.0 = format!("Wave {} / 10", wave.current_wave.max(1));
+        let stage = content.stage(&active);
+        text.0 = format!(
+            "{} - Wave {} / {}",
+            stage.name,
+            wave.current_wave.max(1),
+            (stage.duration / 60.0).ceil() as u32
+        );
     }
     if let Ok(xp) = xp.single() {
         if let Ok(mut text) = labels.p1().single_mut() {
@@ -222,6 +251,24 @@ pub fn update_kill_counter(
     mut kill_counter_query: Query<&mut Text, With<KillCounter>>,
 ) {
     if let Ok(mut text) = kill_counter_query.single_mut() {
-        text.0 = format!("Kills: {}", game_stats.enemies_killed);
+        text.0 = format!(
+            "Kills: {}  Gold: {}",
+            game_stats.enemies_killed, game_stats.gold
+        );
+    }
+}
+
+pub fn update_boss_status(
+    bosses: Query<(&Name, &Health), With<crate::waves::Boss>>,
+    mut text: Query<&mut Text, With<BossStatus>>,
+) {
+    if let Ok(mut text) = text.single_mut() {
+        text.0 = bosses
+            .iter()
+            .filter(|(_, h)| h.current > 0)
+            .take(3)
+            .map(|(name, health)| format!("{}  {} / {}", name, health.current, health.maximum))
+            .collect::<Vec<_>>()
+            .join("  |  ");
     }
 }

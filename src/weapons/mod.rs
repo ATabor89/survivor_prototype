@@ -151,7 +151,7 @@ impl WeaponCooldown {
     /// Limit breaks may exceed 100% reduction, but firing always has a cadence.
     pub const MIN_SECONDS: f32 = 0.1;
 
-    fn effective_seconds(&self, player_reduction: f32) -> f32 {
+    pub(crate) fn effective_seconds(&self, player_reduction: f32) -> f32 {
         let weapon_factor = ((100.0 + self.cooldown_bonus as f32) / 100.0).max(0.0);
         (self.base_duration * weapon_factor * (1.0 - player_reduction.clamp(0.0, 1.0)))
             .max(Self::MIN_SECONDS)
@@ -326,6 +326,7 @@ pub fn area_effect_system(
     mut binding_events: MessageWriter<BindingEvent>,
     context_query: ReadRapierContext,
     enemy_query: Query<&Transform, (With<Enemy>, Without<MarkedForDeath>)>,
+    breakables: Query<(), (With<crate::loot::Breakable>, Without<MarkedForDeath>)>,
     mut enemy_circle_hits: ResMut<EnemyCircleHits>,
 ) {
     let rapier_context = context_query
@@ -337,7 +338,9 @@ pub fn area_effect_system(
     let mut ticking_circles: HashMap<Entity, u32> = HashMap::default();
 
     // First pass: collect all circle effects affecting each enemy
-    for (circle_entity, mut area_effect, _, pattern, circle_transform) in effect_query.iter_mut() {
+    for (circle_entity, mut area_effect, damage, pattern, circle_transform) in
+        effect_query.iter_mut()
+    {
         area_effect.timer.tick(time.delta());
         let ticks = area_effect.timer.times_finished_this_tick();
         if ticks > 0 {
@@ -365,6 +368,17 @@ pub fn area_effect_system(
                     .entry(enemy_entity)
                     .or_default()
                     .push((circle_entity, *pattern, circle_pos));
+            } else if ticks > 0 && breakables.contains(enemy_entity) {
+                // Props participate in Rapier intersections and damage, but never
+                // in enemy-only root, pull, overlap, kill, or XP behavior.
+                if let CircleEffect::Damage { multiplier, .. } = pattern.effect() {
+                    damage_events.write(DamageEvent {
+                        target: enemy_entity,
+                        amount: ((damage.amount as f32 * multiplier).round() as i32)
+                            .saturating_mul(i32::try_from(ticks).unwrap_or(i32::MAX)),
+                        source: Some(circle_entity),
+                    });
+                }
             }
         }
     }
