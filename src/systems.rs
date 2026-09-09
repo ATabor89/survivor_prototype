@@ -59,7 +59,11 @@ pub fn gameplay_movement_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     gamepads: Query<&Gamepad>,
-    mut query: Query<(&Player, &mut KinematicCharacterController)>,
+    mut query: Query<(
+        &Player,
+        &mut KinematicCharacterController,
+        Option<&mut crate::weapons::arsenal::Facing>,
+    )>,
     #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
     // Only process movement in Playing state
@@ -67,7 +71,7 @@ pub fn gameplay_movement_system(
         return;
     }
 
-    for (player, mut controller) in query.iter_mut() {
+    for (player, mut controller, facing) in query.iter_mut() {
         let mut direction = Vec2::ZERO;
         #[cfg(feature = "dev-tools")]
         let keyboard_enabled = !(debug.open && debug.wants_keyboard_input);
@@ -91,6 +95,11 @@ pub fn gameplay_movement_system(
             let stick = gamepad.left_stick();
             if stick.length_squared() > 0.04 {
                 direction += stick;
+            }
+        }
+        if let Some(mut facing) = facing {
+            if direction.length_squared() > 0.0001 {
+                facing.0 = direction.normalize();
             }
         }
         controller.translation =
@@ -192,6 +201,7 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
         },
         DamageCooldown::default(),
         StartingWeapon(WeaponType::MagickCircle),
+        crate::weapons::arsenal::Facing::default(),
     ));
 }
 

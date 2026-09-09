@@ -377,7 +377,7 @@ fn spawn_setup(
             panel.spawn(Node{flex_direction:FlexDirection::Row,column_gap:Val::Px(8.0),..default()}).with_children(|row| {
                 for (index, stage) in content.stages.iter().enumerate() { setup_button(row,&stage.name,SetupAction::Stage(index)); }
             });
-            panel.spawn(Node{flex_direction:FlexDirection::Row,column_gap:Val::Px(8.0),..default()}).with_children(|row| {
+            panel.spawn(Node{flex_direction:FlexDirection::Row,flex_wrap:FlexWrap::Wrap,column_gap:Val::Px(8.0),row_gap:Val::Px(8.0),..default()}).with_children(|row| {
                 for weapon in WeaponType::iter() {
                     setup_button(row,&weapon.to_string(),SetupAction::Weapon(weapon));
                 }
@@ -666,9 +666,15 @@ fn update_setup_summary(
     } else {
         config.seed.to_string()
     };
+    let weapon_hint = if config.weapons.len() == 1 {
+        let kind = config.weapons[0].weapon;
+        format!("{}: {}", kind.family(), kind.summary())
+    } else {
+        "Six weapon slots per run. Inspect individual weapons in the pause or debug menu.".into()
+    };
     for mut text in &mut text {
         text.0 = format!(
-            "Stage: {stage_name}\nObjective: {objective}\nSeed: {seed}\nStarting build: {weapons} | {} passive items\n{}",
+            "Stage: {stage_name}\nObjective: {objective}\nSeed: {seed}\nStarting build: {weapons} | {} passive items\n{weapon_hint}\n{}",
             config.passives.len(),
             status.message
         );

@@ -20,8 +20,12 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use strum::EnumIter;
 
+pub mod arsenal;
 pub mod effects;
+pub mod inscriptions;
 pub mod magick_circle;
+pub mod mobile;
+pub mod rituals;
 use effects::{CircleEffect, PULL_SPEED_CAP, ROOT_LINGER_SECONDS};
 pub mod overlap;
 pub mod projectiles;
@@ -33,6 +37,11 @@ pub struct WeaponPlugin;
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponUpgradeConfig>()
+            .add_plugins((
+                rituals::RitualWeaponsPlugin,
+                inscriptions::InscriptionWeaponsPlugin,
+                mobile::MobileWeaponsPlugin,
+            ))
             .init_resource::<EnemyCircleHits>()
             .init_resource::<ActiveOverlaps>()
             .add_message::<AddWeaponEvent>()
@@ -157,6 +166,14 @@ pub enum WeaponType {
     MagickCircle,
     InscribedNeedles,
     AlchemicalVessel,
+    KnifeOfTheArt,
+    PlanetaryTalismans,
+    AngelicInscription,
+    CirculatingPelican,
+    ForgottenSigil,
+    BoundIntention,
+    EmanationLattice,
+    ResonantRecitation,
 }
 
 impl std::fmt::Display for WeaponType {
@@ -165,6 +182,14 @@ impl std::fmt::Display for WeaponType {
             Self::MagickCircle => write!(f, "Magick Circle"),
             Self::InscribedNeedles => write!(f, "Inscribed Needles"),
             Self::AlchemicalVessel => write!(f, "Alchemical Vessel"),
+            Self::KnifeOfTheArt => write!(f, "Knife of the Art"),
+            Self::PlanetaryTalismans => write!(f, "Planetary Talismans"),
+            Self::AngelicInscription => write!(f, "Angelic Inscription"),
+            Self::CirculatingPelican => write!(f, "Circulating Pelican"),
+            Self::ForgottenSigil => write!(f, "Forgotten Sigil"),
+            Self::BoundIntention => write!(f, "Bound Intention"),
+            Self::EmanationLattice => write!(f, "Emanation Lattice"),
+            Self::ResonantRecitation => write!(f, "Resonant Recitation"),
         }
     }
 }
@@ -175,6 +200,14 @@ impl WeaponType {
             Self::MagickCircle => "magick_circle",
             Self::InscribedNeedles => "inscribed_needles",
             Self::AlchemicalVessel => "alchemical_vessel",
+            Self::KnifeOfTheArt => "knife_of_the_art",
+            Self::PlanetaryTalismans => "planetary_talismans",
+            Self::AngelicInscription => "angelic_inscription",
+            Self::CirculatingPelican => "circulating_pelican",
+            Self::ForgottenSigil => "forgotten_sigil",
+            Self::BoundIntention => "bound_intention",
+            Self::EmanationLattice => "emanation_lattice",
+            Self::ResonantRecitation => "resonant_recitation",
         }
     }
 
@@ -184,6 +217,13 @@ impl WeaponType {
             Self::MagickCircle => "Ceremonial",
             Self::InscribedNeedles => "Talismanic",
             Self::AlchemicalVessel => "Alchemy",
+            Self::KnifeOfTheArt => "Solomonic",
+            Self::PlanetaryTalismans => "Planetary",
+            Self::AngelicInscription => "Enochian",
+            Self::CirculatingPelican => "Alchemy",
+            Self::ForgottenSigil | Self::BoundIntention => "Chaos",
+            Self::EmanationLattice => "Kabbalistic inspiration",
+            Self::ResonantRecitation => "Mantra inspiration",
         }
     }
 
@@ -198,6 +238,52 @@ impl WeaponType {
             Self::AlchemicalVessel => {
                 "Throw a vessel toward the nearest foe; it bursts on impact or landing."
             }
+            Self::KnifeOfTheArt => "Trace a damaging arc in your last movement direction.",
+            Self::PlanetaryTalismans => {
+                "Orbiting medals strike a close perimeter; each cast renews their attack."
+            }
+            Self::AngelicInscription => {
+                "Target a foe with a fixed inscription that strikes in rows, then columns."
+            }
+            Self::CirculatingPelican => {
+                "Paired streams curve outward and return, striking on both journeys."
+            }
+            Self::ForgottenSigil => {
+                "Leave automatic traps that arm, trigger on enemies, or erupt at expiry."
+            }
+            Self::BoundIntention => {
+                "An autonomous familiar pursues durable enemies; cooldown controls its attacks."
+            }
+            Self::EmanationLattice => "A branching pulse divides its damage among nearby enemies.",
+            Self::ResonantRecitation => {
+                "Expanding pulses clear space; every fourth recitation is stronger."
+            }
+        }
+    }
+
+    pub const fn icon(self) -> usize {
+        match self {
+            Self::MagickCircle => 0,
+            Self::InscribedNeedles => 1,
+            Self::AlchemicalVessel => 2,
+            Self::KnifeOfTheArt => 12,
+            Self::PlanetaryTalismans => 13,
+            Self::AngelicInscription => 14,
+            Self::CirculatingPelican => 15,
+            Self::ForgottenSigil => 16,
+            Self::BoundIntention => 17,
+            Self::EmanationLattice => 18,
+            Self::ResonantRecitation => 19,
+        }
+    }
+
+    pub const fn level_bonus(self, level: u32) -> &'static str {
+        match (self, level) {
+            (Self::PlanetaryTalismans, 3 | 5 | 7) => "; +1 orbiting talisman",
+            (Self::EmanationLattice, 2 | 4 | 6) => {
+                "; +1 maximum branch target (shared damage budget)"
+            }
+            _ => "",
         }
     }
 }
@@ -308,6 +394,7 @@ pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type:
         WeaponType::InscribedNeedles | WeaponType::AlchemicalVessel => {
             projectiles::spawn_projectile_weapon(commands, player_entity, weapon_type);
         }
+        _ => arsenal::spawn_weapon(commands, player_entity, weapon_type),
     }
 }
 
@@ -402,6 +489,7 @@ pub fn weapon_firing_system(
             &DamageMultiplier,
             &AreaMultiplier,
             &Transform,
+            Option<&arsenal::Facing>,
         ),
         With<Player>,
     >,
@@ -419,8 +507,13 @@ pub fn weapon_firing_system(
     targets: Query<(Entity, &Transform), (With<Enemy>, Without<MarkedForDeath>)>,
 ) {
     for (weapon_entity, parent, mut cooldown, damage, area, weapon) in weapon_query.iter_mut() {
-        if let Ok((cooldown_reduction, damage_multiplier, area_multiplier, player_transform)) =
-            player_query.get(parent.parent())
+        if let Ok((
+            cooldown_reduction,
+            damage_multiplier,
+            area_multiplier,
+            player_transform,
+            facing,
+        )) = player_query.get(parent.parent())
         {
             let effective_cooldown = cooldown.effective_seconds(cooldown_reduction.percent);
 
@@ -494,6 +587,37 @@ pub fn weapon_firing_system(
                                 effective_radius,
                             );
                         }
+                    }
+                    kind => {
+                        let origin = player_transform.translation.truncate();
+                        let target = targets
+                            .iter()
+                            .filter(|(_, t)| {
+                                t.translation.truncate().distance_squared(origin)
+                                    <= 720.0_f32.powi(2)
+                            })
+                            .min_by(|(a, ta), (b, tb)| {
+                                ta.translation
+                                    .truncate()
+                                    .distance_squared(origin)
+                                    .total_cmp(&tb.translation.truncate().distance_squared(origin))
+                                    .then_with(|| a.cmp(b))
+                            })
+                            .map(|(entity, t)| (entity, t.translation.truncate()));
+                        arsenal::cast(
+                            &mut commands,
+                            arsenal::Cast {
+                                owner: parent.parent(),
+                                weapon: weapon_entity,
+                                kind,
+                                origin,
+                                facing: facing.map_or(Vec2::X, |f| f.0),
+                                target,
+                                damage: effective_damage,
+                                radius: effective_radius,
+                                level: weapon.level,
+                            },
+                        );
                     }
                 }
             }

@@ -40,7 +40,7 @@ pub fn spawn_projectile_weapon(commands: &mut Commands, player: Entity, weapon: 
     let (damage, cooldown, radius) = match weapon {
         WeaponType::InscribedNeedles => (12, 0.8, 4.0),
         WeaponType::AlchemicalVessel => (24, 2.4, 72.0),
-        WeaponType::MagickCircle => return,
+        _ => return,
     };
     commands.entity(player).with_children(|parent| {
         parent.spawn((
@@ -96,7 +96,7 @@ pub fn spawn_projectile(
             Vec2::splat(23.0),
             3.0,
         ),
-        WeaponType::MagickCircle => unreachable!("Circles have a separate attack constructor"),
+        _ => unreachable!("This constructor only handles Needles and Vessel"),
     };
     let entity = commands
         .spawn((

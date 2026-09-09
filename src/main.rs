@@ -1,4 +1,6 @@
 mod arena;
+#[cfg(test)]
+mod arsenal_regression_tests;
 mod art;
 mod audio_controls;
 mod combat;

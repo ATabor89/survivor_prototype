@@ -95,7 +95,10 @@ impl UpgradePool {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join("; ");
-                let description = format!("Level {next_level}: {changes}");
+                let description = format!(
+                    "Level {next_level}: {changes}{}",
+                    weapon_meta.weapon_type.level_bonus(next_level)
+                );
 
                 upgrades.push(UpgradeChoice {
                     upgrade_type: UpgradeType::Weapon(weapon_meta.weapon_type, spec),
@@ -247,11 +250,7 @@ pub fn spawn_upgrade_choice(
 fn get_upgrade_display_info(choice: &UpgradeChoice) -> (usize, String, String) {
     match &choice.upgrade_type {
         UpgradeType::Weapon(weapon_type, ..) | UpgradeType::AcquireWeapon(weapon_type) => {
-            let icon = match weapon_type {
-                WeaponType::MagickCircle => 0,
-                WeaponType::InscribedNeedles => 1,
-                WeaponType::AlchemicalVessel => 2,
-            };
+            let icon = weapon_type.icon();
             (
                 icon,
                 format!("{} Weapon", weapon_type),

@@ -116,11 +116,7 @@ impl BuildView<'_, '_> {
                 name: weapon.weapon_type.to_string(),
                 level: weapon.level,
                 weapon: Some(weapon.weapon_type),
-                icon: match weapon.weapon_type.id() {
-                    "inscribed_needles" => 1,
-                    "alchemical_vessel" => 2,
-                    _ => 0,
-                },
+                icon: weapon.weapon_type.icon(),
             })
             .collect();
         let passives = passives

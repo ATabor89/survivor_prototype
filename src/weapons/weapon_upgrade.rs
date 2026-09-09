@@ -252,6 +252,32 @@ impl WeaponUpgradeConfig {
             },
         );
 
+        for weapon in [
+            WeaponType::KnifeOfTheArt,
+            WeaponType::PlanetaryTalismans,
+            WeaponType::AngelicInscription,
+            WeaponType::CirculatingPelican,
+            WeaponType::ForgottenSigil,
+            WeaponType::BoundIntention,
+            WeaponType::EmanationLattice,
+            WeaponType::ResonantRecitation,
+        ] {
+            data.insert(
+                weapon,
+                WeaponUpgradeData {
+                    progression: vec![
+                        spec(vec![Damage(25)]),
+                        spec(vec![Area(15)]),
+                        spec(vec![Cooldown(-10)]),
+                        spec(vec![Damage(25), Area(15)]),
+                        spec(vec![Cooldown(-10)]),
+                        spec(vec![Damage(25)]),
+                        spec(vec![Damage(25), Area(15), Cooldown(-10)]),
+                    ],
+                },
+            );
+        }
+
         Self { data }
     }
 

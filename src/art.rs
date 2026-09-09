@@ -8,6 +8,7 @@ pub struct ItemIcon(pub usize);
 struct ItemSprites {
     image: Handle<Image>,
     layout: Handle<TextureAtlasLayout>,
+    arsenal: Vec<Handle<Image>>,
 }
 
 pub struct ArtPlugin;
@@ -24,6 +25,18 @@ fn load_item_sprites(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     commands.insert_resource(ItemSprites {
+        arsenal: [
+            "knife",
+            "talismans",
+            "inscription",
+            "pelican",
+            "sigil",
+            "familiar",
+            "lattice",
+            "recitation",
+        ]
+        .map(|name| assets.load(format!("sprites/arsenal/{name}.png")))
+        .to_vec(),
         image: assets.load("sprites/occult-items-v1.png"),
         // Generated output is 1448 x 1086: four columns, three rows.
         layout: layouts.add(TextureAtlasLayout::from_grid(
@@ -45,18 +58,28 @@ fn apply_item_art(
     mut icons: Query<(&ItemIcon, Option<&mut Sprite>, Option<&mut ImageNode>), Changed<ItemIcon>>,
 ) {
     for (icon, sprite, node) in &mut icons {
-        let atlas = TextureAtlas {
-            layout: sprites.layout.clone(),
-            index: icon.0.min(11),
+        let (image, atlas) = match icon
+            .0
+            .checked_sub(12)
+            .and_then(|index| sprites.arsenal.get(index))
+        {
+            Some(image) => (image.clone(), None),
+            None => (
+                sprites.image.clone(),
+                Some(TextureAtlas {
+                    layout: sprites.layout.clone(),
+                    index: icon.0.min(11),
+                }),
+            ),
         };
         if let Some(mut sprite) = sprite {
-            sprite.image = sprites.image.clone();
-            sprite.texture_atlas = Some(atlas.clone());
+            sprite.image = image.clone();
+            sprite.texture_atlas = atlas.clone();
             sprite.color = Color::WHITE;
         }
         if let Some(mut node) = node {
-            node.image = sprites.image.clone();
-            node.texture_atlas = Some(atlas);
+            node.image = image;
+            node.texture_atlas = atlas;
             node.color = Color::WHITE;
         }
     }

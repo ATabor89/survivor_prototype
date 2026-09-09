@@ -80,6 +80,10 @@ and progression. See [circle composition](design/CIRCLE-COMPOSITION.md) for effe
 
 ## Builds and run recipes
 
+The roster now includes eleven weapons. See the [occult arsenal guide](design/OCCULT-ARSENAL.md)
+for the eight new automatic behaviors, upgrade rules, limitations, and focused playtests.
+Every weapon can be selected at run setup or acquired through level-ups and F2 debug tools.
+
 Six weapon slots and six passive slots appear below health/XP, including empty
 slots and item levels. Magick Circle takes one weapon slot. Level-ups can offer
 new equipment while that category has room; owned and capped items are filtered

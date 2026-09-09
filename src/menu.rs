@@ -159,9 +159,10 @@ pub fn spawn_level_up_menu(
                     player_stats,
                 );
                 choice.description = format!(
-                    "Level {}: {}",
+                    "Level {}: {}{}",
                     meta.level.saturating_add(1),
-                    preview.description(spec)
+                    preview.description(spec),
+                    kind.level_bonus(meta.level.saturating_add(1))
                 );
             }
         }
