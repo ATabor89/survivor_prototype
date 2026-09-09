@@ -7,17 +7,20 @@ use crate::weapons::magick_circle::{
     apply_magick_circle_weapon_upgrades, spawn_magick_circle, spawn_magick_circle_attack,
     MagickCircle, PatternType,
 };
+use crate::weapons::overlap::{
+    overlap_detection_system, ActiveOverlaps, EnemyCircleHits,
+};
 use crate::weapons::weapon_upgrade::{
     apply_common_weapon_upgrades, update_weapon_level, WeaponUpgradeConfig,
 };
 use bevy::prelude::*;
-use bevy::utils::HashMap;
 use bevy_rapier2d::prelude::*;
 use std::fmt::Formatter;
 use std::time::Duration;
 use strum_macros::EnumIter;
 
 pub mod magick_circle;
+pub mod overlap;
 pub mod weapon_upgrade;
 
 /// Plugin to register all weapon-related systems
@@ -26,6 +29,8 @@ pub struct WeaponPlugin;
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponUpgradeConfig>()
+            .init_resource::<EnemyCircleHits>()
+            .init_resource::<ActiveOverlaps>()
             .insert_resource(WeaponPickupCounter(0))
             .add_event::<AddWeaponEvent>()
             .add_event::<AreaEffectEvent>()
@@ -50,6 +55,7 @@ impl Plugin for WeaponPlugin {
                     update_weapon_positions,
                     invocation_cleanup_system,
                     area_effect_system,
+                    overlap_detection_system,
                     handle_binding_events,
                     binding_expiration_system,
                     protection_system,
@@ -390,7 +396,9 @@ fn update_weapon_positions(
     }
 }
 
-/// System to manage area effects for weapons that have them
+/// System to manage area effects for weapons that have them.
+/// Populates `EnemyCircleHits` as a side effect so `overlap_detection_system`
+/// can identify enemies inside multiple circles.
 pub fn area_effect_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
@@ -402,13 +410,14 @@ pub fn area_effect_system(
     mut binding_events: EventWriter<BindingEvent>,
     context_query: Query<&RapierContext>,
     enemy_query: Query<Entity, (With<Enemy>, Without<MarkedForDeath>)>,
+    mut enemy_circle_hits: ResMut<EnemyCircleHits>,
 ) {
     let rapier_context = context_query
         .get_single()
         .unwrap_or_else(|e| handle_rapier_context_error(e));
 
-    // Track which enemies are affected by which circles, along with the circle's position
-    let mut enemy_effects: HashMap<Entity, Vec<(Entity, PatternType, Vec2)>> = HashMap::new();
+    // Clear previous frame's data; this resource is also read by overlap_detection_system
+    enemy_circle_hits.hits.clear();
 
     // First pass: collect all circle effects affecting each enemy
     for (circle_entity, mut area_effect, _, _, pattern, circle_transform) in
@@ -432,7 +441,8 @@ pub fn area_effect_system(
                 };
 
                 if enemy_query.contains(enemy_entity) {
-                    enemy_effects
+                    enemy_circle_hits
+                        .hits
                         .entry(enemy_entity)
                         .or_default()
                         .push((circle_entity, *pattern, circle_pos));
@@ -441,8 +451,8 @@ pub fn area_effect_system(
         }
     }
 
-    // Second pass: apply effects for each enemy
-    for (enemy_entity, affecting_circles) in enemy_effects.iter() {
+    // Second pass: apply per-pattern effects for each enemy
+    for (enemy_entity, affecting_circles) in enemy_circle_hits.hits.iter() {
         for (circle_entity, pattern, circle_pos) in affecting_circles {
             match pattern {
                 PatternType::Banishment => {
