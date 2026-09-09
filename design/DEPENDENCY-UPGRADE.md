@@ -90,7 +90,7 @@ These are source-review observations, not results of an interactive playtest.
 
 ## Implementation record
 
-The user approved the migration after the assessment. Work continues on `codex/dependency-upgrade`.
+The user approved the migration after the assessment. The completed upgrade on `codex/dependency-upgrade` was merged locally into its original target, `magick_circle_pattern_select`, by fast-forward through `8d5f874`. That branch is now the baseline for further work; all migration checkpoints remain in its history.
 
 | Checkpoint | Result |
 | --- | --- |
@@ -100,8 +100,9 @@ The user approved the migration after the assessment. Work continues on `codex/d
 | `85f4861` | Bevy 0.17.3 / Rapier 0.32 / Lyon 0.15; compilation passed |
 | `a0887f9` | Bevy 0.18.1 / Rapier 0.33 / Lyon 0.16; compilation passed |
 | `d23cd6b` | Bevy 0.19.1 / Rapier 0.36 / Lyon 0.17; compilation passed |
+| `8d5f874` | Remaining dependencies refreshed, gameplay regressions fixed, six tests and native visual validation passed |
 
-All 41 original project files outside `.git` and `target` were also archived and verified byte-for-byte. The archive is now `.restart-backups/before-dependency-upgrade.zip`, ignored by Git and outside Cargo's build directory. Editor metadata and `nul` were left in place. The original branch was not advanced.
+All 41 original project files outside `.git` and `target` were also archived and verified byte-for-byte. The archive is now `.restart-backups/before-dependency-upgrade.zip`, ignored by Git and outside Cargo's build directory. Editor metadata and `nul` were left in place. The original branch stayed at its starting commit during the migration and was advanced only after validation and the user's merge request.
 
 Bevy 0.19.1 declares Rust 1.95 as its minimum. Installed Rust 1.96.0 satisfies that requirement; no toolchain update was needed. The manifest now records the minimum. Bevy is configured for 2D and UI rather than its full default 3D/audio feature set.
 

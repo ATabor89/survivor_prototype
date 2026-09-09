@@ -49,7 +49,8 @@ still produces dead-code warnings.
 
 ## Migration checkpoints
 
-The dependency upgrade is on `codex/dependency-upgrade`. The original uncommitted
+The dependency upgrade is merged into `magick_circle_pattern_select`, the baseline
+for further work. Migration checkpoints remain on `codex/dependency-upgrade`. The original uncommitted
 source/design work is preserved in commit `8e81ab2`. A byte-verified local ZIP of
 the pre-migration files, including editor metadata and the untracked `nul` file,
 is stored at `.restart-backups/before-dependency-upgrade.zip` and ignored by Git.

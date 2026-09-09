@@ -1,7 +1,7 @@
 # Survivors Prototype - Design Document
 
 > **Last Updated:** 2026-09-08 (dependency migration; game design remains provisional)
-> **Branch:** `codex/dependency-upgrade`
+> **Branch:** `magick_circle_pattern_select` (dependency upgrade merged)
 > **Engine:** Bevy 0.19.1 (Rust 1.95+, tested with 1.96)
 
 ---
