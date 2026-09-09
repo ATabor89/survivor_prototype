@@ -11,6 +11,7 @@ use crate::weapons::overlap::{overlap_detection_system, ActiveOverlaps, EnemyCir
 use crate::weapons::weapon_upgrade::{
     apply_common_weapon_upgrades, update_weapon_level, WeaponUpgradeConfig,
 };
+use crate::GameplaySets;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -43,7 +44,8 @@ impl Plugin for WeaponPlugin {
                         apply_magick_circle_weapon_upgrades,
                     )
                         .after(update_weapon_level),
-                ),
+                )
+                    .before(GameplaySets::Weapons),
             )
             .add_systems(
                 Update,
@@ -63,6 +65,7 @@ impl Plugin for WeaponPlugin {
                     orbital_movement_system,
                 )
                     .chain()
+                    .in_set(GameplaySets::Weapons)
                     .run_if(in_state(GameState::Playing)),
             );
     }
@@ -467,6 +470,14 @@ pub fn area_effect_system(
     // Second pass: apply per-pattern effects for each enemy
     for (enemy_entity, affecting_circles) in enemy_circle_hits.hits.iter() {
         for (circle_entity, pattern, circle_pos) in affecting_circles {
+            // Pulling is continuous while inside a circle, independent of damage ticks.
+            if *pattern == PatternType::Invocation {
+                commands.entity(*enemy_entity).insert(InvocationPull {
+                    pull_target: *circle_pos,
+                    strength: 120.0,
+                });
+                continue;
+            }
             if !ticking_circles.contains(circle_entity) {
                 continue;
             }
@@ -488,11 +499,7 @@ pub fn area_effect_system(
                     });
                 }
                 PatternType::Invocation => {
-                    // Pull enemies toward the circle center
-                    commands.entity(*enemy_entity).insert(InvocationPull {
-                        pull_target: *circle_pos,
-                        strength: 120.0, // Pull speed in pixels/sec
-                    });
+                    // Applied continuously above.
                 }
                 PatternType::Manifestation => {
                     // Periodic damage burst — deals 1.5x the circle's base damage

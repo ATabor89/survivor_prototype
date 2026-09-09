@@ -39,6 +39,7 @@ use upgrade::UpgradePool;
 enum GameplaySets {
     Input,
     UI,
+    Weapons,
     Movement,
     Combat,
     Spawning,
@@ -77,6 +78,7 @@ impl Plugin for SurvivorsGamePlugin {
                     GameplaySets::Input,
                     GameplaySets::UI,
                     GameplaySets::Physics,
+                    GameplaySets::Weapons,
                     GameplaySets::Movement,
                     GameplaySets::Combat,
                     GameplaySets::Spawning,
@@ -92,6 +94,7 @@ impl Plugin for SurvivorsGamePlugin {
                     handle_damage,
                     death_system,
                 )
+                    .chain()
                     .in_set(GameplaySets::Combat)
                     .after(GameplaySets::Physics)
                     .run_if(in_state(GameState::Playing)),

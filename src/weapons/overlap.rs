@@ -26,12 +26,20 @@ impl CirclePair {
     }
 }
 
-/// Describes one overlap between two circles: the pattern types involved
-/// and which enemies are inside both circles.
+/// An unordered pattern combination. Construction normalizes reversed pairs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PatternPair(PatternType, PatternType);
+
+impl PatternPair {
+    pub fn new(a: PatternType, b: PatternType) -> Self {
+        Self(a.min(b), a.max(b))
+    }
+}
+
+/// One physical circle pair. Multiple circle pairs may share a pattern combination.
 #[derive(Debug, Clone)]
 pub struct OverlapInfo {
-    pub pattern_a: PatternType,
-    pub pattern_b: PatternType,
+    pub patterns: PatternPair,
     /// Enemy entities that are inside BOTH circles of this pair.
     pub enemies_in_overlap: HashSet<Entity>,
 }
@@ -45,21 +53,25 @@ pub struct ActiveOverlaps {
 }
 
 impl ActiveOverlaps {
-    /// Returns all pattern-pair combinations affecting a given enemy.
-    pub fn patterns_for_enemy(&self, enemy: Entity) -> Vec<(PatternType, PatternType)> {
-        self.overlaps
+    /// Returns distinct combinations affecting an enemy, in stable pattern order.
+    pub fn patterns_for_enemy(&self, enemy: Entity) -> Vec<PatternPair> {
+        let mut pairs: Vec<_> = self
+            .overlaps
             .values()
             .filter(|info| info.enemies_in_overlap.contains(&enemy))
-            .map(|info| (info.pattern_a, info.pattern_b))
-            .collect()
+            .map(|info| info.patterns)
+            .collect();
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs
     }
 
     /// Returns all unique overlapping pattern pairs, regardless of enemy.
-    pub fn all_pattern_pairs(&self) -> Vec<(PatternType, PatternType)> {
-        self.overlaps
-            .values()
-            .map(|info| (info.pattern_a, info.pattern_b))
-            .collect()
+    pub fn all_pattern_pairs(&self) -> Vec<PatternPair> {
+        let mut pairs: Vec<_> = self.overlaps.values().map(|info| info.patterns).collect();
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs
     }
 }
 
@@ -67,10 +79,9 @@ impl ActiveOverlaps {
 /// Rebuilt every frame by `overlap_detection_system`.
 #[derive(Component, Debug, Clone)]
 pub struct OverlappingPatterns {
-    /// Every (PatternType, PatternType) pair this enemy is inside.
-    /// For an enemy inside circles A, B, C this contains:
-    /// [(A,B), (A,C), (B,C)]
-    pub pattern_pairs: Vec<(PatternType, PatternType)>,
+    /// Distinct unordered pattern combinations, in stable pattern order.
+    /// Physical circle multiplicity remains available in `ActiveOverlaps`.
+    pub pattern_pairs: Vec<PatternPair>,
     /// The circle entities affecting this enemy.
     pub circle_entities: Vec<Entity>,
 }
@@ -88,9 +99,15 @@ pub fn overlap_detection_system(
     // Clear previous frame's data
     active_overlaps.overlaps.clear();
 
-    // Remove OverlappingPatterns from all enemies (clean slate each frame)
+    // Only remove membership from enemies that have actually left the overlap.
     for entity in existing_overlap_enemies.iter() {
-        commands.entity(entity).remove::<OverlappingPatterns>();
+        if enemy_circle_hits
+            .hits
+            .get(&entity)
+            .is_none_or(|circles| circles.len() < 2)
+        {
+            commands.entity(entity).remove::<OverlappingPatterns>();
+        }
     }
 
     // For each enemy affected by 2+ circles, extract all unique pairs
@@ -109,7 +126,8 @@ pub fn overlap_detection_system(
                 let (circle_b, pattern_b, _) = circles[j];
 
                 let pair = CirclePair::new(circle_a, circle_b);
-                pattern_pairs.push((pattern_a, pattern_b));
+                let patterns = PatternPair::new(pattern_a, pattern_b);
+                pattern_pairs.push(patterns);
 
                 // Update the global resource
                 active_overlaps
@@ -122,14 +140,15 @@ pub fn overlap_detection_system(
                         let mut enemies = HashSet::new();
                         enemies.insert(*enemy_entity);
                         OverlapInfo {
-                            pattern_a,
-                            pattern_b,
+                            patterns,
                             enemies_in_overlap: enemies,
                         }
                     });
             }
         }
 
+        pattern_pairs.sort_unstable();
+        pattern_pairs.dedup();
         // Attach component to this enemy
         commands.entity(*enemy_entity).insert(OverlappingPatterns {
             pattern_pairs,
@@ -142,9 +161,8 @@ pub fn overlap_detection_system(
     if !active_overlaps.overlaps.is_empty() {
         for (_pair, info) in active_overlaps.overlaps.iter() {
             debug!(
-                "Overlap detected: {:?} + {:?} affecting {} enemies",
-                info.pattern_a,
-                info.pattern_b,
+                "Overlap detected: {:?} affecting {} enemies",
+                info.patterns,
                 info.enemies_in_overlap.len()
             );
         }

@@ -228,7 +228,7 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 | Pattern | Color | Sigil Shape | Sigil Count | Orbit Speed | Effect |
 |---------|-------|-------------|-------------|-------------|--------|
 | **Banishment** | Red-orange | Triangle (3-sided) | 4 | 1.5 (fast) | Direct damage |
-| **Binding** | Purple | Hexagon (6-sided) | 6 | 0.5 (slow) | Slows enemies for 1s |
+| **Binding** | Purple | Hexagon (6-sided) | 6 | 0.5 (slow) | Roots enemies; expires 1s after the last effect tick |
 | **Invocation** | Teal | Pentagram (5-sided) | 5 | -1.0 (reverse) | Pulls enemies toward center |
 | **Manifestation** | Green | Star (6-pointed) | 3 | 0.8 (moderate) | 1.5x damage bursts |
 | **Protection** | Silver-blue | Diamond (4-sided) | 4 | 0.7 (steady) | 50% damage reduction to player |
@@ -237,7 +237,7 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 
 - **Spawning:** Circles spawn on cooldown (base 3.5s), positioned around the player
 - **Duration:** Each circle lasts 3 seconds before despawning
-- **Area Effect Tick:** Enemies inside a circle take effects every 0.5 seconds
+- **Area Effect Tick:** Damage and Binding refresh every 0.5 seconds. Invocation pulls continuously while inside; Protection is checked every frame.
 - **Orbiting Sigils:** Visual sigils orbit the circle center at pattern-specific speeds
 - **Base Damage:** 10 (modified by upgrades and multipliers)
 - **Base Radius:** 64 pixels
@@ -249,7 +249,7 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 - `Attack` - Marker for spawned circle attacks
 - `Lifetime` - Despawn timer
 - `AreaEffect` - Tick rate for periodic damage
-- `BindingEffect` - Slow debuff with expiry
+- `BindingEffect` - Movement root with expiry (external Invocation pulls can still move enemies)
 - `InvocationPull` - Pull-toward-center force
 - `ProtectionBuff` - Damage reduction applied to player
 
@@ -258,10 +258,12 @@ Each pattern has distinct visual identity, behavior, and gameplay role:
 Located in `weapons/overlap.rs`. Detects when enemies are inside multiple circles simultaneously:
 
 - `EnemyCircleHits` - Maps each enemy to the set of circles affecting it
-- `ActiveOverlaps` - Tracks which pattern-type pairs share enemies
+- `ActiveOverlaps` - Tracks physical circle pairs and their shared enemies; lookup helpers return unique, unordered pattern combinations
 - `OverlappingPatterns` - Component attached to enemies in 2+ circles
 
 This is the foundation for combo/synergy effects between different pattern types (not yet implemented).
+
+Pattern combinations have stable ordering and include same-pattern overlaps. Multiple physical circle pairs remain available separately, so a future combo design can choose its own stacking rules. Weapon effects run before enemy movement and combat; damage is handled before death processing.
 
 ---
 

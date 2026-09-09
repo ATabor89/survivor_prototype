@@ -43,7 +43,8 @@ cargo test --locked
 
 The tests run the game plugins and Rapier without a window/GPU. They cover
 movement and pause, damage/death and XP pickup, circle effects and cleanup,
-overlap membership, and keyboard/mouse upgrade flows. Rendering and layout also
+overlap membership and unique combinations, continuous Invocation pull and cleanup,
+Binding expiry, Protection damage reduction, and keyboard/mouse upgrade flows. Rendering and layout also
 need a visual check after engine or UI changes. Some unused prototype scaffolding
 still produces dead-code warnings.
 

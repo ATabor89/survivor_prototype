@@ -24,7 +24,7 @@ pub struct MagickCircle {
     pub num_sigils: u32,
 }
 
-#[derive(Component, Debug, Copy, Clone, Eq, PartialEq, EnumIter)]
+#[derive(Component, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 pub enum PatternType {
     Banishment,    // Damages/pushes enemies
     Binding,       // Slows/holds enemies
@@ -68,7 +68,7 @@ impl PatternType {
             PatternType::Protection => {
                 "Creates a defensive circle that reduces incoming damage".to_string()
             }
-            PatternType::Binding => "Slows enemies within the circle".to_string(),
+            PatternType::Binding => "Roots enemies, lingering briefly after they leave".to_string(),
             PatternType::Banishment => "Damages enemies within the circle".to_string(),
             PatternType::Invocation => "Pulls enemies toward the circle's center".to_string(),
             PatternType::Manifestation => "Creates periodic effects within the circle".to_string(),

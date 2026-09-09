@@ -90,6 +90,202 @@ fn circle(app: &mut App, pattern: PatternType, position: Vec3) -> Entity {
 }
 
 #[test]
+fn binding_roots_then_expires_and_protection_applies_before_damage() {
+    let mut app = game();
+    let player = player(&mut app);
+    circle(&mut app, PatternType::Protection, Vec3::ZERO);
+    let enemy = app
+        .world_mut()
+        .spawn((
+            Enemy {
+                speed: 100.0,
+                experience_value: 1,
+            },
+            Health {
+                current: 1000,
+                maximum: 1000,
+            },
+            Transform::from_xyz(280.0, 0.0, 0.0),
+        ))
+        .id();
+    let binding = circle(&mut app, PatternType::Binding, Vec3::new(250.0, 0.0, 0.0));
+    step(&mut app, 4);
+    // Force a binding tick on the next update and rebuild the protection buff.
+    app.world_mut()
+        .get_mut::<weapons::AreaEffect>(binding)
+        .unwrap()
+        .last_tick = -1.0;
+    app.world_mut()
+        .entity_mut(player)
+        .remove::<weapons::ProtectionBuff>();
+    app.world_mut()
+        .get_mut::<combat::DamageCooldown>(player)
+        .unwrap()
+        .time = -1.0;
+    app.world_mut().write_message(DamageEvent {
+        target: player,
+        amount: 20,
+        source: None,
+    });
+    step(&mut app, 1);
+    assert_eq!(app.world().get::<Health>(player).unwrap().current, 90);
+    assert!(app.world().get::<weapons::BindingEffect>(enemy).is_some());
+    assert_eq!(
+        app.world().get::<Velocity>(enemy).unwrap().linear,
+        Vec2::ZERO
+    );
+    app.world_mut().despawn(binding);
+    step(&mut app, 20);
+    assert!(app.world().get::<weapons::BindingEffect>(enemy).is_some());
+    assert_eq!(
+        app.world().get::<Velocity>(enemy).unwrap().linear,
+        Vec2::ZERO
+    );
+    step(&mut app, 45);
+    assert!(app.world().get::<weapons::BindingEffect>(enemy).is_none());
+    assert!(app.world().get::<Velocity>(enemy).unwrap().linear.x < -60.0);
+}
+
+#[test]
+fn overlap_combinations_are_unique_and_independent_of_circle_order() {
+    use weapons::overlap::{
+        overlap_detection_system, ActiveOverlaps, EnemyCircleHits, OverlappingPatterns, PatternPair,
+    };
+    let mut app = App::new();
+    app.init_resource::<ActiveOverlaps>()
+        .init_resource::<EnemyCircleHits>()
+        .add_systems(Update, overlap_detection_system);
+    let first = app.world_mut().spawn_empty().id();
+    let second = app.world_mut().spawn_empty().id();
+    let third = app.world_mut().spawn_empty().id();
+    let enemy = app.world_mut().spawn_empty().id();
+    let other_enemy = app.world_mut().spawn_empty().id();
+    let mut hits = vec![
+        (first, PatternType::Binding, Vec2::ZERO),
+        (second, PatternType::Banishment, Vec2::ZERO),
+        (third, PatternType::Banishment, Vec2::ZERO),
+    ];
+    let mut expected = vec![
+        PatternPair::new(PatternType::Banishment, PatternType::Binding),
+        PatternPair::new(PatternType::Banishment, PatternType::Banishment),
+    ];
+    expected.sort_unstable();
+    for _ in 0..2 {
+        app.world_mut()
+            .resource_mut::<EnemyCircleHits>()
+            .hits
+            .insert(enemy, hits.clone());
+        let mut reversed = hits.clone();
+        reversed.reverse();
+        app.world_mut()
+            .resource_mut::<EnemyCircleHits>()
+            .hits
+            .insert(other_enemy, reversed);
+        app.update();
+        let overlaps = app.world().resource::<ActiveOverlaps>();
+        assert_eq!(
+            overlaps.overlaps.len(),
+            3,
+            "preserve distinct physical circle pairs"
+        );
+        assert!(overlaps
+            .overlaps
+            .values()
+            .all(|info| info.enemies_in_overlap.len() == 2));
+        assert_eq!(overlaps.all_pattern_pairs(), expected);
+        assert_eq!(overlaps.patterns_for_enemy(enemy), expected);
+        assert_eq!(overlaps.patterns_for_enemy(other_enemy), expected);
+        assert_eq!(
+            app.world()
+                .get::<OverlappingPatterns>(enemy)
+                .unwrap()
+                .pattern_pairs,
+            expected
+        );
+        hits.reverse();
+    }
+    app.world_mut()
+        .resource_mut::<EnemyCircleHits>()
+        .hits
+        .insert(enemy, vec![hits[0]]);
+    app.world_mut()
+        .resource_mut::<EnemyCircleHits>()
+        .hits
+        .remove(&other_enemy);
+    app.update();
+    assert!(app
+        .world()
+        .resource::<ActiveOverlaps>()
+        .all_pattern_pairs()
+        .is_empty());
+    assert!(app.world().get::<OverlappingPatterns>(enemy).is_none());
+    assert!(app
+        .world()
+        .get::<OverlappingPatterns>(other_enemy)
+        .is_none());
+}
+
+#[test]
+fn invocation_pulls_between_ticks_and_stops_after_exit_or_circle_despawn() {
+    let mut app = game();
+    let enemy = app
+        .world_mut()
+        .spawn((
+            Enemy {
+                speed: 0.0,
+                experience_value: 1,
+            },
+            Health {
+                current: 1000,
+                maximum: 1000,
+            },
+            Transform::from_xyz(290.0, 0.0, 0.0),
+        ))
+        .id();
+    let attack = circle(
+        &mut app,
+        PatternType::Invocation,
+        Vec3::new(250.0, 0.0, 0.0),
+    );
+    step(&mut app, 4);
+    // All these frames precede the first 0.5-second damage/status tick.
+    for _ in 0..10 {
+        let previous_x = app.world().get::<Transform>(enemy).unwrap().translation.x;
+        step(&mut app, 1);
+        assert!(app.world().get::<weapons::InvocationPull>(enemy).is_some());
+        // Rapier applies damping after the movement system sets the pull velocity.
+        assert!(app.world().get::<Velocity>(enemy).unwrap().linear.x < -100.0);
+        assert!(app.world().get::<Transform>(enemy).unwrap().translation.x < previous_x - 1.0);
+    }
+    app.world_mut()
+        .get_mut::<Transform>(enemy)
+        .unwrap()
+        .translation
+        .x = 500.0;
+    step(&mut app, 3);
+    assert!(app.world().get::<weapons::InvocationPull>(enemy).is_none());
+    assert_eq!(
+        app.world().get::<Velocity>(enemy).unwrap().linear,
+        Vec2::ZERO
+    );
+
+    app.world_mut()
+        .get_mut::<Transform>(enemy)
+        .unwrap()
+        .translation
+        .x = 290.0;
+    step(&mut app, 3);
+    assert!(app.world().get::<weapons::InvocationPull>(enemy).is_some());
+    app.world_mut().despawn(attack);
+    step(&mut app, 1);
+    assert!(app.world().get::<weapons::InvocationPull>(enemy).is_none());
+    assert_eq!(
+        app.world().get::<Velocity>(enemy).unwrap().linear,
+        Vec2::ZERO
+    );
+}
+
+#[test]
 fn overlaps_persist_between_staggered_damage_ticks_and_clear_on_exit() {
     let mut app = game();
     let enemy = app
