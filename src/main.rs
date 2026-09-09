@@ -1,4 +1,5 @@
 mod arena;
+mod art;
 mod combat;
 mod components;
 mod content;
@@ -7,12 +8,15 @@ mod death;
 mod dev_tools;
 mod events;
 mod experience;
+mod inventory;
 mod loot;
 mod menu;
 mod physics;
 mod resources;
 mod run;
+mod setup;
 mod systems;
+mod telemetry;
 mod types;
 mod ui;
 mod upgrade;
@@ -24,6 +28,8 @@ mod debug_regression_tests;
 #[cfg(test)]
 mod encounter_regression_tests;
 #[cfg(test)]
+mod inventory_regression_tests;
+#[cfg(test)]
 mod loot_regression_tests;
 #[cfg(test)]
 mod map_regression_tests;
@@ -32,7 +38,11 @@ mod menu_regression_tests;
 #[cfg(test)]
 mod physics_regression_tests;
 #[cfg(test)]
+mod projectile_regression_tests;
+#[cfg(test)]
 mod run_regression_tests;
+#[cfg(test)]
+mod setup_regression_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -85,6 +95,7 @@ impl Plugin for SurvivorsGamePlugin {
             .init_resource::<SpawnTimer>()
             .init_resource::<WaveConfig>()
             .init_resource::<UpgradePool>()
+            .init_resource::<telemetry::RunTelemetry>()
             // Events
             .add_message::<DamageEvent>()
             .add_message::<EntityDeathEvent>()
@@ -98,8 +109,21 @@ impl Plugin for SurvivorsGamePlugin {
             .add_plugins(WeaponPlugin)
             .add_plugins((arena::ArenaPlugin, run::RunPlugin, waves::WavesPlugin))
             .add_plugins(loot::LootPlugin)
+            .add_plugins((
+                inventory::InventoryPlugin,
+                setup::SetupPlugin,
+                art::ArtPlugin,
+            ))
             // Startup systems
-            .add_systems(Startup, (load_textures, spawn_player.after(load_textures)))
+            .add_systems(
+                Startup,
+                (
+                    load_textures,
+                    spawn_player
+                        .after(load_textures)
+                        .run_if(in_state(GameState::Playing)),
+                ),
+            )
             // Configure system sets
             .configure_sets(
                 Update,
@@ -161,6 +185,7 @@ impl Plugin for SurvivorsGamePlugin {
                     update_kill_counter,
                     ui::update_run_status,
                     ui::update_boss_status,
+                    ui::update_build_slots,
                 )
                     .in_set(GameplaySets::UI)
                     .run_if(in_state(GameState::Playing)),
@@ -204,7 +229,17 @@ fn main() {
     )
     .add_plugins(ShapePlugin)
     .add_plugins(SurvivorsGamePlugin);
+    // Headless gameplay harnesses start in Playing; the executable opens setup.
+    app.insert_state(GameState::MainMenu);
     #[cfg(feature = "dev-tools")]
-    app.add_plugins((bevy_egui::EguiPlugin::default(), dev_tools::DebugUiPlugin));
+    app.add_plugins((
+        bevy_egui::EguiPlugin {
+            // Both UI systems share the stage camera. Order debug tools after
+            // Bevy UI so modal backdrops cannot cover the persistent panel.
+            ui_render_order: bevy_egui::UiRenderOrder::EguiAboveBevyUi,
+            ..default()
+        },
+        dev_tools::DebugUiPlugin,
+    ));
     app.run();
 }

@@ -1,6 +1,9 @@
-use crate::components::{Health, Player};
+use crate::components::{Health, Player, PlayerStats};
 use crate::experience::{calculate_experience_needed, Experience};
+use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveType, MAX_PASSIVES, MAX_WEAPONS};
 use crate::resources::{GameStats, WaveConfig};
+use crate::weapons::WeaponMeta;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 // Root node marker
@@ -25,6 +28,128 @@ pub struct ExperienceStatus;
 #[derive(Component)]
 pub struct BossStatus;
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildSlotKind {
+    Weapon,
+    Passive,
+}
+
+#[derive(Component)]
+pub struct BuildSlot {
+    pub kind: BuildSlotKind,
+    pub index: usize,
+}
+
+#[derive(Component)]
+pub struct BuildSlotLabel;
+
+#[derive(Component)]
+pub(crate) struct BuildSlotIcon;
+
+#[derive(Clone)]
+pub(crate) struct BuildEntry {
+    pub name: String,
+    pub level: u32,
+    pub icon: usize,
+    pub weapon: Option<crate::weapons::WeaponType>,
+}
+
+#[derive(Clone)]
+pub(crate) struct BuildSnapshot {
+    pub weapons: Vec<BuildEntry>,
+    pub passives: Vec<BuildEntry>,
+    pub stats: String,
+}
+
+/// Captured before dead players and their weapon children are removed.
+#[derive(Resource, Default)]
+pub(crate) struct FinalBuild(pub Option<BuildSnapshot>);
+
+pub(crate) fn capture_final_build(
+    view: BuildView,
+    next: Res<NextState<crate::resources::GameState>>,
+    mut final_build: ResMut<FinalBuild>,
+) {
+    if !matches!(
+        next.as_ref(),
+        NextState::Pending(
+            crate::resources::GameState::GameOver | crate::resources::GameState::Victory
+        )
+    ) {
+        return;
+    }
+    if let Some(snapshot) = view.snapshot() {
+        final_build.0 = Some(snapshot);
+    }
+}
+
+pub(crate) fn reset_final_build(mut final_build: ResMut<FinalBuild>) {
+    final_build.0 = None;
+}
+
+#[derive(SystemParam)]
+pub(crate) struct BuildView<'w, 's> {
+    player: Query<
+        'w,
+        's,
+        (
+            &'static Health,
+            &'static PlayerStats,
+            &'static PassiveInventory,
+            &'static Children,
+        ),
+        With<Player>,
+    >,
+    weapons: Query<'w, 's, &'static WeaponMeta>,
+    catalog: Res<'w, PassiveCatalog>,
+}
+
+impl BuildView<'_, '_> {
+    pub(crate) fn snapshot(&self) -> Option<BuildSnapshot> {
+        let Ok((health, stats, passives, children)) = self.player.single() else {
+            return None;
+        };
+        let weapons = children
+            .iter()
+            .filter_map(|entity| self.weapons.get(entity).ok())
+            .map(|weapon| BuildEntry {
+                name: weapon.weapon_type.to_string(),
+                level: weapon.level,
+                weapon: Some(weapon.weapon_type),
+                icon: match weapon.weapon_type.id() {
+                    "inscribed_needles" => 1,
+                    "alchemical_vessel" => 2,
+                    _ => 0,
+                },
+            })
+            .collect();
+        let passives = passives
+            .items
+            .iter()
+            .map(|item| BuildEntry {
+                name: self.catalog.get(item.kind).name.clone(),
+                level: item.level as u32,
+                weapon: None,
+                icon: match item.kind {
+                    PassiveType::MoveSpeed => 3,
+                    PassiveType::PickupRange => 4,
+                    PassiveType::MaxHealth => 5,
+                    PassiveType::Cooldown => 6,
+                },
+            })
+            .collect();
+        Some(BuildSnapshot {
+            weapons, passives,
+            stats: format!(
+                "Health  {} / {}\nMovement speed  {:.0}\nPickup range  {:.0}\nDamage  {:.0}%\nArea  {:.0}%\nCooldown reduction  {:.0}%\nLuck  {}\nArmor  {:.0}\nRegeneration  {:.1} / s",
+                health.current, health.maximum, stats.move_speed, stats.pickup_range,
+                stats.damage_multiplier * 100.0, stats.area_multiplier * 100.0,
+                stats.cooldown_reduction * 100.0, stats.luck, stats.armor, stats.regeneration,
+            ),
+        })
+    }
+}
+
 pub fn spawn_ui(mut commands: Commands) {
     // Root node with marker component
     commands
@@ -39,6 +164,14 @@ pub fn spawn_ui(mut commands: Commands) {
             GameUI,
         ))
         .with_children(|parent| {
+            spawn_build_slots(parent, BuildSlotKind::Weapon, "WEAPONS", 78.0, MAX_WEAPONS);
+            spawn_build_slots(
+                parent,
+                BuildSlotKind::Passive,
+                "PASSIVES",
+                178.0,
+                MAX_PASSIVES,
+            );
             // Health bar container
             parent
                 .spawn((
@@ -171,6 +304,120 @@ pub fn spawn_ui(mut commands: Commands) {
                 },
             ));
         });
+}
+
+fn spawn_build_slots(
+    parent: &mut ChildSpawnerCommands,
+    kind: BuildSlotKind,
+    title: &str,
+    top: f32,
+    count: usize,
+) {
+    parent
+        .spawn((Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(top),
+            left: Val::Px(10.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            ..default()
+        },))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(title),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.78, 0.7)),
+            ));
+            row.spawn(Node {
+                column_gap: Val::Px(4.0),
+                ..default()
+            })
+            .with_children(|slots| {
+                for index in 0..count {
+                    slots
+                        .spawn((
+                            BuildSlot { kind, index },
+                            Node {
+                                width: Val::Px(88.0),
+                                height: Val::Px(74.0),
+                                padding: UiRect::all(Val::Px(4.0)),
+                                border: UiRect::all(Val::Px(1.0)),
+                                flex_direction: FlexDirection::Column,
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                row_gap: Val::Px(2.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.07, 0.08, 0.10, 0.90)),
+                            BorderColor::all(Color::srgb(0.25, 0.25, 0.28)),
+                        ))
+                        .with_children(|slot| {
+                            slot.spawn((
+                                ImageNode::default(),
+                                crate::art::ItemIcon(0),
+                                BuildSlotIcon,
+                                Node {
+                                    width: Val::Px(26.0),
+                                    height: Val::Px(26.0),
+                                    display: Display::None,
+                                    ..default()
+                                },
+                            ));
+                            slot.spawn((
+                                Text::new("Empty"),
+                                BuildSlotLabel,
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.72, 0.73, 0.76)),
+                                TextLayout::justify(Justify::Center),
+                            ));
+                        });
+                }
+            });
+        });
+}
+
+pub(crate) fn update_build_slots(
+    build: BuildView,
+    slots: Query<(&BuildSlot, &Children)>,
+    mut labels: Query<&mut Text, With<BuildSlotLabel>>,
+    mut icons: Query<(&mut Node, &mut crate::art::ItemIcon), With<BuildSlotIcon>>,
+) {
+    let snapshot = build.snapshot();
+    for (slot, children) in &slots {
+        let entry = snapshot.as_ref().and_then(|build| match slot.kind {
+            BuildSlotKind::Weapon => build.weapons.get(slot.index),
+            BuildSlotKind::Passive => build.passives.get(slot.index),
+        });
+        for child in children.iter() {
+            if let Ok(mut text) = labels.get_mut(child) {
+                let value = entry.map_or_else(
+                    || "Empty".to_string(),
+                    |entry| format!("{}\nLv. {}", entry.name, entry.level),
+                );
+                if text.0 != value {
+                    text.0 = value;
+                }
+            }
+            if let Ok((mut node, mut icon)) = icons.get_mut(child) {
+                node.display = if entry.is_some() {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+                if let Some(entry) = entry {
+                    if icon.0 != entry.icon {
+                        icon.0 = entry.icon;
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn cleanup_ui(mut commands: Commands, ui_query: Query<Entity, With<GameUI>>) {

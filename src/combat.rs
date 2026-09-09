@@ -27,6 +27,7 @@ impl Default for DamageCooldown {
 
 #[expect(
     clippy::type_complexity,
+    clippy::too_many_arguments,
     reason = "The ECS query keeps optional damage modifiers and dying-target exclusions explicit."
 )]
 pub fn handle_damage(
@@ -41,6 +42,10 @@ pub fn handle_damage(
         ),
         (Without<MarkedForDeath>, Without<MarkedForDespawn>),
     >,
+    attack_sources: Query<&crate::weapons::AttackSource>,
+    enemies: Query<(), With<crate::components::Enemy>>,
+    mut telemetry: ResMut<crate::telemetry::RunTelemetry>,
+    players: Query<(), With<crate::components::Player>>,
     #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
     #[cfg(feature = "dev-tools")] player_query: Query<(), With<crate::components::Player>>,
 ) {
@@ -74,6 +79,18 @@ pub fn handle_damage(
             event.amount
         };
 
+        let removed = effective_damage.min(health.current).max(0) as u64;
+        if enemies.contains(event.target) {
+            if let Some(weapon) = event
+                .source
+                .and_then(|source| attack_sources.get(source).ok())
+            {
+                telemetry.record_weapon(weapon.0, removed);
+            }
+        }
+        if players.contains(event.target) {
+            telemetry.damage_taken = telemetry.damage_taken.saturating_add(removed);
+        }
         health.current -= effective_damage;
         debug!(
             "Applied {} damage to {:?} from {:?}; health is {}",

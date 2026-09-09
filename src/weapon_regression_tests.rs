@@ -91,13 +91,28 @@ fn accumulated_upgrade_bonuses_saturate_instead_of_overflowing() {
 }
 
 #[test]
-fn every_limit_break_offer_changes_a_supported_stat() {
+fn weapon_progressions_offer_supported_changes_and_stop_at_their_cap() {
     let config = WeaponUpgradeConfig::default();
-    let offers = config.get_next_upgrades(WeaponType::MagickCircle, 8);
+    let mut offers = Vec::new();
+    for weapon in [
+        WeaponType::MagickCircle,
+        WeaponType::InscribedNeedles,
+        WeaponType::AlchemicalVessel,
+    ] {
+        assert!(config
+            .get_next_upgrades(weapon, config.max_level(weapon))
+            .is_empty());
+        for level in 1..config.max_level(weapon) {
+            offers.extend(config.get_next_upgrades(weapon, level));
+        }
+    }
     assert!(!offers.is_empty());
     for offer in offers {
         assert!(!offer.changes.is_empty());
-        assert!(offer.changes.iter().all(|change| matches!(change,
+        assert!(offer.changes.iter().all(|change| matches!(
+            change,
+            WeaponUpgradeChange::AddCircle { .. }
+        ) || matches!(change,
             WeaponUpgradeChange::Damage(value)
             | WeaponUpgradeChange::Area(value)
             | WeaponUpgradeChange::Cooldown(value) if *value != 0

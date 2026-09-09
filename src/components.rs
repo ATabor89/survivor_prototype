@@ -19,6 +19,20 @@ pub struct Health {
     pub maximum: i32,
 }
 
+/// Effective global stats, used by gameplay and the build/stat display.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PlayerStats {
+    pub move_speed: f32,
+    pub pickup_range: f32,
+    pub max_health: i32,
+    pub cooldown_reduction: f32,
+    pub damage_multiplier: f32,
+    pub area_multiplier: f32,
+    pub luck: i32,
+    pub armor: f32,
+    pub regeneration: f32,
+}
+
 /// Player-specific components that affect weapons
 #[derive(Component)]
 pub struct CooldownReduction {

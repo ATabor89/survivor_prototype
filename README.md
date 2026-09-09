@@ -1,8 +1,9 @@
 # Survivors Prototype
 
 An occult-themed 2D survivors prototype built with Bevy 0.19, Rapier, and Lyon.
-Build a weapon from five Magick Circle patterns while collecting experience,
-breaking props for supplies, and surviving authored enemy phases and boss encounters.
+Build an inventory of Magick Circles, Inscribed Needles, Alchemical Vessels, and
+passive items while collecting experience, breaking props for supplies, and
+surviving authored enemy phases and boss encounters.
 Three bounded stages offer arena, horizontal, and vertical layouts. Death and
 victory both lead to a run summary and a fresh-run option.
 
@@ -36,7 +37,10 @@ player rather than zooming out to fit the whole stage.
 - **Controller left stick:** move; **D-pad Up/Down:** navigate menus;
   **South face button** (A/Cross): confirm; **Start:** pause/resume.
 
-The game starts directly in the Sealed Courtyard. Pause, level-up selection,
+The game starts at expedition setup: choose a stage, seed, and starting weapon.
+Import/export a run recipe through `run-config.ron` in the launch directory;
+the Debug menu can also export the current build as a starting loadout.
+Pause, level-up selection,
 treasure reveals, and the paused Debug menu freeze the run clock. Chests reveal
 weapon upgrades before they are claimed; confirm again to claim and resume.
 
@@ -51,16 +55,17 @@ keyboard/mouse.
 cargo run --locked --features dev-tools
 ```
 
-**F1 while playing** opens the Debug menu, formerly Circle Lab. **F2** opens its
-Weapons tab directly. New openings pause the simulation; uncheck **Pause simulation**
+**F1** opens the persistent Debug menu, including on the main menu. **F2** opens its
+Weapons tab directly. The initial preference pauses the simulation; uncheck **Pause simulation**
 to keep playing with the menu visible. F1, Escape, Start, or **Close menu** closes
 the overlay. Text-widget focus blocks WASD while the live menu needs keyboard input.
-Level-up, treasure, and result screens take priority over the debug overlay.
+Level-up, treasure, and result screens retain their own state while the debug
+panel stays open. Its visibility, tab, and pause preference survive run changes.
 
 | Tab | Controls |
 | --- | --- |
 | Run | Heal, grant a level, toggle natural spawns/invulnerability, skip a minute or the next authored phase, test victory, and trigger named encounters |
-| Weapons | Circle patterns and presets, apply builds, spawn stationary/moving test targets |
+| Weapons | Circle patterns and presets, weapon/passive grants, apply builds, spawn stationary/moving test targets |
 | World | Select a stage and restart, spawn test chests/healing/urns, show Rapier colliders, clear the arena |
 
 Encounter requests made while paused remain queued until the simulation resumes.
@@ -68,6 +73,21 @@ Encounter requests made while paused remain queued until the simulation resumes.
 and stops before the stage's ending. **Test victory** uses that stage's duration.
 Choosing a stage starts a fresh run. **Clear arena** preserves the current build
 and progression. See [circle composition](design/CIRCLE-COMPOSITION.md) for effect rules.
+
+## Builds and run recipes
+
+Six weapon slots and six passive slots appear below health/XP, including empty
+slots and item levels. Magick Circle takes one weapon slot. Level-ups can offer
+new equipment while that category has room; owned and capped items are filtered
+appropriately. Chests upgrade owned weapons/passives and fall back to gold for
+fully capped builds. The pause screen shows effective stats, the full build,
+run totals, and actual enemy damage by weapon.
+
+Passive tuning is in [items.ron](assets/data/items.ron). Run recipes are versioned
+and validated before use. Separate seeded wave, loot, and reward streams support
+repeatable experiments; they are not a deterministic physics replay or mid-run save.
+See [the build and recipe guide](design/BUILD-DIVERSITY.md) for mechanics, the
+worldbuilding contract, configuration behavior, art provenance, and verification.
 
 ## Stages and content
 
@@ -90,8 +110,8 @@ enemy definitions, encounter schedules, obstacles, pickups, and breakables witho
 editing Rust. Content is validated at startup. See [stage content and playtesting](design/STAGE-CONTENT.md)
 for authoring details and the current verification record.
 
-Encounter schedules and XP progression are an initial balance pass. A title
-screen, saves, audio, and persistent progression remain future work. The
+Encounter schedules and XP progression are an initial balance pass. Mid-run
+saves, audio, and persistent progression remain future work. The
 [systems review](design/SYSTEMS-REVIEW.md) records the earlier refactor baseline;
 [the design document](design/DESIGN.md) preserves the larger concept.
 

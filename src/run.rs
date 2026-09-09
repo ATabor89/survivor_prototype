@@ -20,8 +20,15 @@ impl Plugin for RunPlugin {
         )
         .add_systems(
             OnEnter(GameState::Restarting),
-            (reset_run, crate::systems::spawn_player, resume_run).chain(),
+            (
+                reset_run,
+                crate::systems::spawn_player,
+                crate::setup::apply_starting_loadout,
+                resume_run,
+            )
+                .chain(),
         );
+        app.add_systems(OnEnter(GameState::MainMenu), reset_run);
     }
 }
 
@@ -62,6 +69,19 @@ fn reset_run(world: &mut World) {
         }
     }
     *world.resource_mut::<GameStats>() = GameStats::default();
+    *world.resource_mut::<crate::telemetry::RunTelemetry>() =
+        crate::telemetry::RunTelemetry::default();
+    let stage_id = world
+        .resource::<crate::content::GameContent>()
+        .stage(world.resource::<crate::content::ActiveStage>())
+        .id
+        .clone();
+    world
+        .resource_mut::<crate::setup::ActiveRunConfig>()
+        .0
+        .stage = stage_id;
+    let seed = world.resource::<crate::setup::ActiveRunConfig>().0.seed;
+    *world.resource_mut::<crate::setup::RunRng>() = crate::setup::RunRng::new(seed);
     *world.resource_mut::<SpawnTimer>() = SpawnTimer::default();
     *world.resource_mut::<WaveConfig>() = WaveConfig::default();
     *world.resource_mut::<crate::waves::WaveDirector>() = crate::waves::WaveDirector::default();
@@ -69,6 +89,7 @@ fn reset_run(world: &mut World) {
         .resource_mut::<Messages<crate::waves::TriggerEncounter>>()
         .clear();
     crate::loot::reset_loot(world);
+    world.remove_resource::<crate::menu::PendingAddCircleUpgrade>();
     world
         .resource_mut::<crate::weapons::overlap::EnemyCircleHits>()
         .hits
@@ -86,6 +107,9 @@ fn reset_run(world: &mut World) {
     world.resource_mut::<Messages<BindingEvent>>().clear();
     world.resource_mut::<Messages<AddWeaponEvent>>().clear();
     world
+        .resource_mut::<Messages<crate::inventory::PassiveUpgradeEvent>>()
+        .clear();
+    world
         .resource_mut::<Messages<crate::menu::WeaponUpgradeConfirmedEvent>>()
         .clear();
     world
@@ -93,11 +117,18 @@ fn reset_run(world: &mut World) {
         .clear();
     #[cfg(feature = "dev-tools")]
     {
-        *world.resource_mut::<crate::dev_tools::DebugSession>() =
-            crate::dev_tools::DebugSession::default();
+        crate::dev_tools::reset_debug_run(world);
     }
 }
 
-fn resume_run(mut next: ResMut<NextState<GameState>>) {
+fn resume_run(
+    mut next: ResMut<NextState<GameState>>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
+) {
+    #[cfg(feature = "dev-tools")]
+    if debug.open && debug.pause_simulation {
+        next.set(GameState::DebugTools);
+        return;
+    }
     next.set(GameState::Playing);
 }

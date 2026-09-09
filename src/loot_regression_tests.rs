@@ -133,14 +133,20 @@ fn treasure_pauses_and_claims_real_progression_once_including_added_circles() {
     assert_eq!(state(&app), GameState::Treasure);
     let rewards = app.world().resource::<PendingTreasure>().rewards.clone();
     assert!([1, 3, 5].contains(&rewards.len()));
-    assert!(rewards[0]
-        .upgrade
+    let crate::upgrade::UpgradeType::Weapon(_, first_upgrade) = &rewards[0].upgrade else {
+        panic!("expected owned weapon reward");
+    };
+    assert!(first_upgrade
         .changes
         .iter()
         .any(|change| matches!(change, WeaponUpgradeChange::AddCircle { pattern: Some(_) })));
     let added_circles = rewards
         .iter()
-        .flat_map(|reward| &reward.upgrade.changes)
+        .filter_map(|reward| match &reward.upgrade {
+            crate::upgrade::UpgradeType::Weapon(_, spec) => Some(&spec.changes),
+            _ => None,
+        })
+        .flatten()
         .filter(|change| matches!(change, WeaponUpgradeChange::AddCircle { .. }))
         .count();
     let clock = app.world().resource::<GameStats>().time_elapsed;

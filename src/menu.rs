@@ -1,11 +1,12 @@
 use crate::components::{Luck, Player};
+use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveUpgradeEvent};
 use crate::resources::{GameState, GameStats};
 use crate::types::Rarity;
 use crate::upgrade;
 use crate::upgrade::{GenericUpgrade, UpgradePool, UpgradeType};
 use crate::weapons::magick_circle::PatternType;
 use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig, WeaponUpgradeSpec};
-use crate::weapons::{WeaponMeta, WeaponType};
+use crate::weapons::{AddWeaponEvent, WeaponMeta, WeaponType};
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
@@ -18,12 +19,22 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WeaponUpgradeConfirmedEvent>()
             .add_message::<MenuActivation>()
+            .init_resource::<crate::ui::FinalBuild>()
+            .add_systems(
+                Update,
+                crate::ui::capture_final_build
+                    .after(crate::GameplaySets::Progress)
+                    .before(crate::GameplaySets::Cleanup),
+            )
+            .add_systems(OnEnter(GameState::MainMenu), crate::ui::reset_final_build)
+            .add_systems(OnEnter(GameState::Restarting), crate::ui::reset_final_build)
             .add_systems(
                 Update,
                 (
                     collect_menu_activation,
                     dispatch_menu_action,
                     update_menu_buttons,
+                    update_pause_readouts,
                 )
                     .chain(),
             )
@@ -68,6 +79,7 @@ pub enum MenuType {
 pub enum MenuAction {
     RestartRun,
     ResumeGame,
+    ReturnToTitle,
     QuitGame,
     SelectUpgrade(UpgradeChoice),
     SelectPattern(PatternType),
@@ -92,26 +104,68 @@ pub struct GenericUpgradeConfirmedEvent {
     pub generic_upgrade_type: GenericUpgrade,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Level-up choices use the actual inventory, passive catalog, and seeded offer stream."
+)]
 pub fn spawn_level_up_menu(
     mut commands: Commands,
     weapon_upgrade_config: Res<WeaponUpgradeConfig>,
     upgrade_pool: Res<UpgradePool>,
     existing_menu: Query<Entity, With<MenuRoot>>,
-    weapon_query: Query<&WeaponMeta>,
-    luck_query: Query<(&Player, &Luck)>,
+    weapon_query: Query<(
+        &WeaponMeta,
+        &crate::weapons::WeaponDamage,
+        &crate::weapons::WeaponArea,
+        &crate::weapons::WeaponCooldown,
+    )>,
+    luck_query: Query<(&Luck, &PassiveInventory, &crate::components::PlayerStats), With<Player>>,
+    catalog: Res<PassiveCatalog>,
+    mut rng: ResMut<crate::setup::RunRng>,
 ) {
     if !existing_menu.is_empty() {
         return;
     }
 
-    let Ok((_player, luck)) = luck_query.single() else {
+    let Ok((luck, passives, player_stats)) = luck_query.single() else {
         return;
     };
 
-    let weapons = weapon_query.iter().collect::<Vec<_>>();
+    let weapons = weapon_query
+        .iter()
+        .map(|(meta, ..)| meta)
+        .collect::<Vec<_>>();
 
     // Offer only implemented upgrades, with luck allowing an extra choice.
-    let choices = upgrade_pool.generate_choices(weapon_upgrade_config.as_ref(), luck, &weapons);
+    let mut choices = upgrade_pool.generate_choices(
+        weapon_upgrade_config.as_ref(),
+        luck,
+        &weapons,
+        passives,
+        &catalog,
+        &mut rng.upgrades,
+    );
+    for choice in &mut choices {
+        if let UpgradeType::Weapon(kind, spec) = &choice.upgrade_type {
+            if let Some((meta, damage, area, cooldown)) = weapon_query
+                .iter()
+                .find(|(meta, ..)| meta.weapon_type == *kind)
+            {
+                let preview = crate::weapons::weapon_upgrade::preview_weapon_upgrade(
+                    spec,
+                    damage,
+                    area,
+                    cooldown,
+                    player_stats,
+                );
+                choice.description = format!(
+                    "Level {}: {}",
+                    meta.level.saturating_add(1),
+                    preview.description(spec)
+                );
+            }
+        }
+    }
 
     debug!("Level-up choices: {:?}", choices);
 
@@ -257,6 +311,13 @@ type MenuButtons<'w, 's> = Query<
     With<Button>,
 >;
 
+#[cfg_attr(
+    feature = "dev-tools",
+    expect(
+        clippy::too_many_arguments,
+        reason = "Debug input capture is separate from the menu's gamepad, keyboard, hierarchy, and activation state."
+    )
+)]
 fn collect_menu_activation(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
@@ -265,6 +326,7 @@ fn collect_menu_activation(
     mut buttons: MenuButtons,
     mut input: Local<MenuInputState>,
     mut activations: MessageWriter<MenuActivation>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
     let Ok(root) = roots.single() else {
         input.root = None;
@@ -296,20 +358,26 @@ fn collect_menu_activation(
     if items.is_empty() {
         return;
     }
+    #[cfg(feature = "dev-tools")]
+    let (keyboard_allowed, pointer_allowed) = (!debug.blocks_keyboard(), !debug.blocks_pointer());
+    #[cfg(not(feature = "dev-tools"))]
+    let (keyboard_allowed, pointer_allowed) = (true, true);
     let selected = items
         .iter()
         .position(|entity| buttons.get(*entity).is_ok_and(|(item, _, _)| item.selected))
         .unwrap_or(0);
-    let up = keyboard.just_pressed(KeyCode::ArrowUp)
-        || keyboard.just_pressed(KeyCode::KeyW)
-        || gamepads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::DPadUp));
-    let down = keyboard.just_pressed(KeyCode::ArrowDown)
-        || keyboard.just_pressed(KeyCode::KeyS)
-        || gamepads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::DPadDown));
+    let up = keyboard_allowed
+        && (keyboard.just_pressed(KeyCode::ArrowUp)
+            || keyboard.just_pressed(KeyCode::KeyW)
+            || gamepads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::DPadUp)));
+    let down = keyboard_allowed
+        && (keyboard.just_pressed(KeyCode::ArrowDown)
+            || keyboard.just_pressed(KeyCode::KeyS)
+            || gamepads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::DPadDown)));
     let selected = if up {
         (selected + items.len() - 1) % items.len()
     } else if down {
@@ -322,15 +390,17 @@ fn collect_menu_activation(
             item.selected = index == selected;
         }
     }
-    let clicked = items
-        .iter()
-        .copied()
-        .find(|entity| pressed_buttons.contains(entity) && !input.pressed_buttons.contains(entity));
-    let confirmed = keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::Space)
-        || gamepads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::South));
+    let clicked = items.iter().copied().find(|entity| {
+        pointer_allowed
+            && pressed_buttons.contains(entity)
+            && !input.pressed_buttons.contains(entity)
+    });
+    let confirmed = keyboard_allowed
+        && (keyboard.just_pressed(KeyCode::Enter)
+            || keyboard.just_pressed(KeyCode::Space)
+            || gamepads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::South)));
     // An explicit click wins over keyboard focus if both occur together.
     if let Some(entity) = clicked.or_else(|| confirmed.then_some(items[selected])) {
         if let Ok((_, action, _)) = buttons.get(entity) {
@@ -343,7 +413,14 @@ fn collect_menu_activation(
     input.pressed_buttons = pressed_buttons;
 }
 
-// Basic pause menu spawning system
+#[derive(Component, Clone, Copy)]
+pub(crate) enum PauseReadout {
+    Run,
+    Stats,
+    Weapons,
+    Passives,
+}
+
 pub fn spawn_pause_menu(mut commands: Commands) {
     commands
         .spawn((
@@ -355,23 +432,92 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            GlobalZIndex(100),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
             MenuRoot {
                 menu_type: MenuType::Pause,
             },
         ))
-        .with_children(|parent| {
-            spawn_menu_container(parent, |parent| {
-                spawn_menu_button(parent, "Resume", MenuAction::ResumeGame, true);
-                spawn_menu_button(parent, "Quit", MenuAction::QuitGame, false);
-            });
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        width: Val::Px(920.0),
+                        max_width: Val::Percent(95.0),
+                        padding: UiRect::all(Val::Px(24.0)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(14.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.075, 0.075, 0.10)),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new("Paused"),
+                        TextFont {
+                            font_size: FontSize::Px(30.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.94, 0.82, 0.52)),
+                    ));
+                    spawn_pause_readout(panel, PauseReadout::Run, 16.0);
+                    panel
+                        .spawn(Node {
+                            column_gap: Val::Px(24.0),
+                            ..default()
+                        })
+                        .with_children(|columns| {
+                            for (kind, title, width) in [
+                                (PauseReadout::Stats, "PLAYER STATS", 270.0),
+                                (PauseReadout::Weapons, "WEAPONS", 300.0),
+                                (PauseReadout::Passives, "PASSIVES", 235.0),
+                            ] {
+                                columns
+                                    .spawn(Node {
+                                        width: Val::Px(width),
+                                        flex_direction: FlexDirection::Column,
+                                        row_gap: Val::Px(10.0),
+                                        ..default()
+                                    })
+                                    .with_children(|column| {
+                                        column.spawn((
+                                            Text::new(title),
+                                            TextFont {
+                                                font_size: FontSize::Px(15.0),
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.75, 0.68, 0.48)),
+                                        ));
+                                        spawn_pause_readout(column, kind, 16.0);
+                                    });
+                            }
+                        });
+                    panel
+                        .spawn(Node {
+                            justify_content: JustifyContent::Center,
+                            column_gap: Val::Px(12.0),
+                            padding: UiRect::top(Val::Px(12.0)),
+                            ..default()
+                        })
+                        .with_children(|buttons| {
+                            for (index, (label, action)) in [
+                                ("Resume", MenuAction::ResumeGame),
+                                ("Main menu", MenuAction::ReturnToTitle),
+                                ("Quit", MenuAction::QuitGame),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                spawn_compact_button(buttons, label, action, index == 0);
+                            }
+                        });
+                });
         });
 }
 
-// Helper function to spawn menu buttons
-pub fn spawn_menu_button(
+fn spawn_compact_button(
     parent: &mut ChildSpawnerCommands,
-    text: &str,
+    label: &str,
     action: MenuAction,
     selected: bool,
 ) {
@@ -379,26 +525,89 @@ pub fn spawn_menu_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(200.0),
-                height: Val::Px(50.0),
+                width: Val::Px(140.0),
+                height: Val::Px(38.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
             MenuItem { selected },
             MenuActionComponent { action },
+            BackgroundColor(Color::srgb(0.22, 0.23, 0.27)),
         ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new(text),
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(20.0),
+                    font_size: FontSize::Px(16.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn spawn_pause_readout(parent: &mut ChildSpawnerCommands, kind: PauseReadout, size: f32) {
+    parent.spawn((
+        kind,
+        Text::new(""),
+        TextFont {
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(Color::srgb(0.85, 0.85, 0.88)),
+        Node {
+            width: Val::Percent(100.0),
+            // Wrapped inventory rows determine their own height; do not squeeze
+            // their final lines when the neighboring columns are shorter.
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ));
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Pause readouts combine build, seed, stage, progression, and combat telemetry."
+)]
+fn update_pause_readouts(
+    build: crate::ui::BuildView,
+    stats: Res<GameStats>,
+    content: Res<crate::content::GameContent>,
+    active: Res<crate::content::ActiveStage>,
+    config: Res<crate::setup::ActiveRunConfig>,
+    xp: Query<&crate::experience::Experience, With<Player>>,
+    telemetry: Option<Res<crate::telemetry::RunTelemetry>>,
+    mut labels: Query<(&PauseReadout, &mut Text)>,
+) {
+    if labels.is_empty() {
+        return;
+    }
+    let snapshot = build.snapshot();
+    let seconds = stats.time_elapsed as u32;
+    for (kind, mut text) in &mut labels {
+        let value = match kind {
+            PauseReadout::Run => format!("{}  |  {:02}:{:02}  |  Level {}  |  Kills {}  |  Gold {}\nSeed {}  |  Damage taken {}", content.stage(&active).name, seconds / 60, seconds % 60,
+                xp.single().map_or(1, |xp| xp.level), stats.enemies_killed, stats.gold, config.0.seed,
+                telemetry.as_ref().map_or(0, |data| data.damage_taken)),
+            PauseReadout::Stats => snapshot.as_ref().map_or_else(|| "No active player".into(), |build| build.stats.clone()),
+            PauseReadout::Weapons | PauseReadout::Passives => {
+                let count = if matches!(kind, PauseReadout::Weapons) { crate::inventory::MAX_WEAPONS } else { crate::inventory::MAX_PASSIVES };
+                let entries = snapshot.as_ref().map(|build| if matches!(kind, PauseReadout::Weapons) { &build.weapons } else { &build.passives });
+                (0..count).map(|index| {
+                    entries.and_then(|items| items.get(index)).map_or_else(|| format!("{}. Empty", index + 1), |entry| {
+                        if let Some(weapon) = entry.weapon {
+                            let damage = telemetry.as_ref().and_then(|data| data.damage_by_weapon.get(&weapon)).copied().unwrap_or(0);
+                            format!("{}. {}\n   Lv. {} | {}\n   Damage {damage}", index + 1, entry.name, entry.level, weapon.family())
+                        } else { format!("{}. {}\n   Lv. {}", index + 1, entry.name, entry.level) }
+                    })
+                }).collect::<Vec<_>>().join("\n\n")
+            }
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
 }
 
 // Specialized button for pattern selection - wider with title + description layout
@@ -510,6 +719,10 @@ pub fn update_menu_buttons(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Menu choices route through the existing weapon, acquisition, passive, and generic message APIs."
+)]
 fn dispatch_menu_action(
     mut commands: Commands,
     mut activations: MessageReader<MenuActivation>,
@@ -518,6 +731,9 @@ fn dispatch_menu_action(
     mut next_state: ResMut<NextState<GameState>>,
     mut weapon_upgrades: MessageWriter<WeaponUpgradeConfirmedEvent>,
     mut generic_upgrades: MessageWriter<GenericUpgradeConfirmedEvent>,
+    mut acquire_weapons: MessageWriter<AddWeaponEvent>,
+    mut passive_upgrades: MessageWriter<PassiveUpgradeEvent>,
+    players: Query<Entity, With<Player>>,
 ) {
     for activation in activations.read() {
         let Ok(root) = roots.get(activation.root) else {
@@ -526,6 +742,7 @@ fn dispatch_menu_action(
         match &activation.action {
             MenuAction::RestartRun => next_state.set(GameState::Restarting),
             MenuAction::ResumeGame => next_state.set(GameState::Playing),
+            MenuAction::ReturnToTitle => next_state.set(GameState::MainMenu),
             MenuAction::QuitGame => next_state.set(GameState::Quit),
             MenuAction::SelectUpgrade(choice) if root.menu_type == MenuType::LevelUp => {
                 commands.entity(activation.root).despawn();
@@ -551,6 +768,25 @@ fn dispatch_menu_action(
                         generic_upgrades.write(GenericUpgradeConfirmedEvent {
                             generic_upgrade_type: *generic,
                         });
+                        next_state.set(GameState::Playing);
+                    }
+                    UpgradeType::AcquireWeapon(weapon_type) => {
+                        if let Ok(player) = players.single() {
+                            acquire_weapons.write(AddWeaponEvent {
+                                player,
+                                weapon_type: *weapon_type,
+                            });
+                        }
+                        next_state.set(GameState::Playing);
+                    }
+                    UpgradeType::Passive(kind, level) => {
+                        if let Ok(player) = players.single() {
+                            passive_upgrades.write(PassiveUpgradeEvent {
+                                player,
+                                kind: *kind,
+                                level: *level,
+                            });
+                        }
                         next_state.set(GameState::Playing);
                     }
                 }
@@ -586,23 +822,37 @@ pub struct PendingAddCircleUpgrade {
     pub upgrade_spec: WeaponUpgradeSpec,
 }
 
-fn spawn_game_over_menu(mut commands: Commands, stats: Res<GameStats>) {
+fn spawn_game_over_menu(
+    mut commands: Commands,
+    stats: Res<GameStats>,
+    build: Res<crate::ui::FinalBuild>,
+    telemetry: Res<crate::telemetry::RunTelemetry>,
+) {
     spawn_run_end_menu(
         &mut commands,
         MenuType::GameOver,
         "Run ended",
         "Try another build and survive the onslaught.",
         &stats,
+        &build,
+        &telemetry,
     );
 }
 
-fn spawn_victory_menu(mut commands: Commands, stats: Res<GameStats>) {
+fn spawn_victory_menu(
+    mut commands: Commands,
+    stats: Res<GameStats>,
+    build: Res<crate::ui::FinalBuild>,
+    telemetry: Res<crate::telemetry::RunTelemetry>,
+) {
     spawn_run_end_menu(
         &mut commands,
         MenuType::Victory,
         "Victory!",
         "You survived the expedition.",
         &stats,
+        &build,
+        &telemetry,
     );
 }
 
@@ -612,14 +862,17 @@ fn spawn_run_end_menu(
     title: &str,
     description: &str,
     stats: &GameStats,
+    build: &crate::ui::FinalBuild,
+    telemetry: &crate::telemetry::RunTelemetry,
 ) {
     let seconds = stats.time_elapsed as u32;
     let summary = format!(
-        "Time: {:02}:{:02}   |   Enemies defeated: {}   |   Gold: {}",
+        "Time: {:02}:{:02}   |   Enemies defeated: {}   |   Gold: {}\nDamage taken: {}",
         seconds / 60,
         seconds % 60,
         stats.enemies_killed,
-        stats.gold
+        stats.gold,
+        telemetry.damage_taken,
     );
     commands
         .spawn((
@@ -662,8 +915,80 @@ fn spawn_run_end_menu(
                     },
                     TextColor(Color::srgb(0.8, 0.8, 0.8)),
                 ));
-                spawn_menu_button(parent, "Play again", MenuAction::RestartRun, true);
-                spawn_menu_button(parent, "Quit", MenuAction::QuitGame, false);
+                spawn_final_build(parent, build.0.as_ref(), telemetry);
+                parent
+                    .spawn(Node {
+                        column_gap: Val::Px(12.0),
+                        ..default()
+                    })
+                    .with_children(|parent| {
+                        spawn_compact_button(parent, "Play again", MenuAction::RestartRun, true);
+                        spawn_compact_button(parent, "Main menu", MenuAction::ReturnToTitle, false);
+                        spawn_compact_button(parent, "Quit", MenuAction::QuitGame, false);
+                    });
             });
+        });
+}
+
+#[derive(Component)]
+pub(crate) struct FinalBuildReadout;
+
+fn spawn_final_build(
+    parent: &mut ChildSpawnerCommands,
+    snapshot: Option<&crate::ui::BuildSnapshot>,
+    telemetry: &crate::telemetry::RunTelemetry,
+) {
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(30.0),
+            ..default()
+        })
+        .with_children(|parent| {
+            for (heading, entries) in [
+                ("FINAL WEAPONS", snapshot.map(|build| &build.weapons)),
+                ("FINAL PASSIVES", snapshot.map(|build| &build.passives)),
+            ] {
+                let details = entries.map_or_else(
+                    || "No recorded build".into(),
+                    |entries| {
+                        if entries.is_empty() {
+                            return "None".into();
+                        }
+                        entries
+                            .iter()
+                            .map(|entry| {
+                                let damage = entry
+                                    .weapon
+                                    .map(|weapon| {
+                                        format!(
+                                            "\nDamage {}",
+                                            telemetry
+                                                .damage_by_weapon
+                                                .get(&weapon)
+                                                .copied()
+                                                .unwrap_or(0)
+                                        )
+                                    })
+                                    .unwrap_or_default();
+                                format!("{}  Lv. {}{damage}", entry.name, entry.level)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n")
+                    },
+                );
+                parent.spawn((
+                    Text::new(format!("{heading}\n\n{details}")),
+                    TextFont {
+                        font_size: FontSize::Px(16.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.85, 0.85, 0.88)),
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    FinalBuildReadout,
+                ));
+            }
         });
 }

@@ -15,6 +15,7 @@ use bevy_prototype_lyon::{
     shapes,
 };
 use bevy_rapier2d::prelude::*;
+use rand::RngExt;
 use std::collections::HashSet;
 
 #[derive(Resource, Default)]
@@ -133,14 +134,15 @@ pub fn offscreen_position(
     view: Vec2,
     bounds: Vec2,
     layout: StageLayout,
+    rng: &mut impl RngExt,
 ) -> Option<Vec2> {
     let edge = view + Vec2::splat(70.0);
     for _ in 0..32 {
-        let along = rand::random::<f32>() * 2.0 - 1.0;
+        let along = rng.random::<f32>() * 2.0 - 1.0;
         let side = match layout {
-            StageLayout::Arena => rand::random::<u32>() % 4,
-            StageLayout::Horizontal => rand::random::<u32>() % 2,
-            StageLayout::Vertical => 2 + rand::random::<u32>() % 2,
+            StageLayout::Arena => rng.random_range(0..4),
+            StageLayout::Horizontal => rng.random_range(0..2),
+            StageLayout::Vertical => 2 + rng.random_range(0..2),
         };
         let offset = match side {
             0 => Vec2::new(-edge.x, along * view.y.min(bounds.y - 30.0)),
@@ -158,13 +160,17 @@ pub fn offscreen_position(
     None
 }
 
-fn enemy_definition<'a>(content: &'a GameContent, phase: &WavePhase) -> &'a EnemyDefinition {
+fn enemy_definition<'a>(
+    content: &'a GameContent,
+    phase: &WavePhase,
+    rng: &mut impl RngExt,
+) -> &'a EnemyDefinition {
     let total: u64 = phase
         .enemies
         .iter()
         .map(|entry| u64::from(entry.weight))
         .sum();
-    let mut roll = rand::random::<u64>() % total;
+    let mut roll = rng.random_range(0..total);
     for entry in &phase.enemies {
         if roll < u64::from(entry.weight) {
             return content.enemy(&entry.id).expect("validated enemy reference");
@@ -230,6 +236,7 @@ fn spawn_wave(
     mut timer: ResMut<SpawnTimer>,
     mut config: ResMut<WaveConfig>,
     mut director: ResMut<WaveDirector>,
+    mut rng: ResMut<crate::setup::RunRng>,
     enemies: Query<(), With<Enemy>>,
     player: Query<&Health, With<Player>>,
     camera: Query<(&Transform, &Projection), With<GameCamera>>,
@@ -277,13 +284,14 @@ fn spawn_wave(
             camera_half_view(projection),
             bounds.half_size,
             stage.layout,
+            &mut rng.waves,
         ) else {
             continue;
         };
         let enemy = spawn_enemy(
             &mut commands,
             &textures,
-            enemy_definition(&content, phase),
+            enemy_definition(&content, phase, &mut rng.waves),
             position,
             phase.health_scale,
         );

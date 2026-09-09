@@ -103,7 +103,9 @@ fn lab_wave_and_victory_shortcuts_use_normal_run_transitions() {
     assert_eq!(state(&app), GameState::Victory);
     key(&mut app, KeyCode::Enter);
     step(&mut app, 4);
-    assert_eq!(state(&app), GameState::Playing);
+    // The persistent debug workspace retains its pause preference on restart.
+    assert_eq!(state(&app), GameState::DebugTools);
+    assert!(app.world().resource::<DebugSession>().open);
     assert!(app.world().resource::<DebugSession>().waves);
     assert!(!app.world().resource::<DebugSession>().invulnerable);
 }

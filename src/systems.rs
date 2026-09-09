@@ -142,6 +142,8 @@ pub fn handle_pause_state(
                 time.unpause();
             }
             GameState::Paused
+            | GameState::MainMenu
+            | GameState::Settings
             | GameState::LevelUp
             | GameState::Treasure
             | GameState::GameOver

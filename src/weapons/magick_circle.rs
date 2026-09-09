@@ -1,8 +1,8 @@
 use crate::menu::WeaponUpgradeConfirmedEvent;
 use crate::weapons::weapon_upgrade::WeaponUpgradeChange;
 use crate::weapons::{
-    AreaEffect, Attack, Damage, Lifetime, Orbits, Sigil, WeaponArea, WeaponCooldown, WeaponDamage,
-    WeaponMeta, WeaponType,
+    AreaEffect, Attack, AttackSource, Damage, Lifetime, Orbits, Sigil, WeaponArea, WeaponCooldown,
+    WeaponDamage, WeaponMeta, WeaponType,
 };
 use bevy::color::Color;
 use bevy::log::info;
@@ -45,7 +45,21 @@ pub fn animate_manifestation_charge(
     }
 }
 
-#[derive(Component, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
+#[derive(
+    Component,
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    EnumIter,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum PatternType {
     Banishment,
     Binding,
@@ -240,6 +254,7 @@ pub fn spawn_magick_circle_attack(
     let attack_entity = commands
         .spawn((
             Attack,
+            AttackSource(WeaponType::MagickCircle),
             Lifetime {
                 timer: Timer::from_seconds(3.0, TimerMode::Once),
             },

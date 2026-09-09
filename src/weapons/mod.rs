@@ -15,6 +15,7 @@ use crate::GameplaySets;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::fmt::Formatter;
 use std::time::Duration;
 use strum::EnumIter;
@@ -23,6 +24,7 @@ pub mod effects;
 pub mod magick_circle;
 use effects::{CircleEffect, PULL_SPEED_CAP, ROOT_LINGER_SECONDS};
 pub mod overlap;
+pub mod projectiles;
 pub mod weapon_upgrade;
 
 /// Plugin to register all weapon-related systems
@@ -53,6 +55,7 @@ impl Plugin for WeaponPlugin {
                     setup_player_inventory,
                     handle_new_weapons,
                     weapon_firing_system,
+                    projectiles::resolve_projectiles,
                     invocation_cleanup_system,
                     area_effect_system,
                     magick_circle::animate_manifestation_charge,
@@ -109,28 +112,98 @@ pub fn setup_player_inventory(
 }
 
 // This system only runs when new weapons are added
-pub fn handle_new_weapons(mut commands: Commands, mut events: MessageReader<AddWeaponEvent>) {
+pub fn handle_new_weapons(
+    mut commands: Commands,
+    mut events: MessageReader<AddWeaponEvent>,
+    weapons: Query<(&ChildOf, &WeaponMeta)>,
+    players: Query<(), With<Player>>,
+) {
+    let mut owned: HashMap<Entity, Vec<WeaponType>> = HashMap::default();
+    for (parent, meta) in &weapons {
+        owned
+            .entry(parent.parent())
+            .or_default()
+            .push(meta.weapon_type);
+    }
     for event in events.read() {
+        if !players.contains(event.player) {
+            continue;
+        }
+        let types = owned.entry(event.player).or_default();
+        if types.contains(&event.weapon_type) || types.len() >= crate::inventory::MAX_WEAPONS {
+            continue;
+        }
         spawn_weapon(&mut commands, event.player, event.weapon_type);
+        types.push(event.weapon_type);
     }
 }
 
-#[derive(Debug, Component, Copy, Clone, Eq, PartialEq, Hash, EnumIter)]
+#[derive(
+    Debug,
+    Component,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    EnumIter,
+    Deserialize,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum WeaponType {
     MagickCircle,
-    // Future weapon types...
+    InscribedNeedles,
+    AlchemicalVessel,
 }
 
 impl std::fmt::Display for WeaponType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MagickCircle => write!(f, "Magick Circle"),
+            Self::InscribedNeedles => write!(f, "Inscribed Needles"),
+            Self::AlchemicalVessel => write!(f, "Alchemical Vessel"),
+        }
+    }
+}
+
+impl WeaponType {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::MagickCircle => "magick_circle",
+            Self::InscribedNeedles => "inscribed_needles",
+            Self::AlchemicalVessel => "alchemical_vessel",
+        }
+    }
+
+    /// Fictional build categories, not claims about historical practices.
+    pub const fn family(self) -> &'static str {
+        match self {
+            Self::MagickCircle => "Ceremonial",
+            Self::InscribedNeedles => "Talismanic",
+            Self::AlchemicalVessel => "Alchemy",
+        }
+    }
+
+    pub const fn summary(self) -> &'static str {
+        match self {
+            Self::MagickCircle => {
+                "Stationary circles compose damage, roots, pulls, and protection."
+            }
+            Self::InscribedNeedles => {
+                "Auto-aimed needles pierce up to three targets; walls stop them."
+            }
+            Self::AlchemicalVessel => {
+                "Throw a vessel toward the nearest foe; it bursts on impact or landing."
+            }
         }
     }
 }
 
 /// Base weapon statistics
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct WeaponCooldown {
     pub timer: Timer,
     pub base_duration: f32,
@@ -158,10 +231,19 @@ impl WeaponCooldown {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct WeaponDamage {
     pub base_amount: i32,
     pub damage_bonus: i32, // Positive numbers increase damage
+}
+
+impl WeaponDamage {
+    pub(crate) fn effective_amount(&self, player_multiplier: f32) -> i32 {
+        let weapon_factor = ((100.0 + self.damage_bonus as f32) / 100.0).max(0.0);
+        (self.base_amount as f32 * weapon_factor * player_multiplier.max(0.0))
+            .max(0.0)
+            .floor() as i32
+    }
 }
 
 #[derive(Component)]
@@ -169,15 +251,26 @@ pub struct Damage {
     pub amount: i32,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct WeaponArea {
     pub base_radius: f32,
     pub area_bonus: i32, // Positive numbers increase area
 }
 
+impl WeaponArea {
+    pub(crate) fn effective_radius(&self, player_multiplier: f32) -> f32 {
+        let weapon_factor = ((100.0 + self.area_bonus as f32) / 100.0).max(0.0);
+        (self.base_radius * weapon_factor * player_multiplier.max(0.0)).max(0.0)
+    }
+}
+
 /// Attack-specific components
 #[derive(Component)]
 pub struct Attack; // Formerly held an AttackType enum
+
+/// Kept on the attack until damage is resolved so telemetry can attribute hits.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AttackSource(pub WeaponType);
 
 #[derive(Component)]
 pub struct Lifetime {
@@ -212,11 +305,93 @@ impl AreaEffect {
 pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType) {
     match weapon_type {
         WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity),
-        // Add other weapon types here
+        WeaponType::InscribedNeedles | WeaponType::AlchemicalVessel => {
+            projectiles::spawn_projectile_weapon(commands, player_entity, weapon_type);
+        }
     }
 }
 
+/// Restores an authored loadout through the same stat changes as normal upgrades.
+pub(crate) fn grant_configured_weapon(
+    world: &mut World,
+    player: Entity,
+    kind: WeaponType,
+    level: u32,
+    patterns: &[PatternType],
+) -> Result<(), String> {
+    use weapon_upgrade::{apply_stat_change, WeaponUpgradeChange};
+    if world.get::<Player>(player).is_none() {
+        return Err("Weapon owner is not a player".into());
+    }
+    let config = world.resource::<WeaponUpgradeConfig>();
+    if level == 0 || level > config.max_level(kind) {
+        return Err(format!(
+            "{kind} level must be between 1 and {}",
+            config.max_level(kind)
+        ));
+    }
+    let progression: Vec<_> = (1..level)
+        .flat_map(|current| config.get_next_upgrades(kind, current))
+        .collect();
+    let circle_count = 1 + progression
+        .iter()
+        .flat_map(|spec| &spec.changes)
+        .filter(|change| matches!(change, WeaponUpgradeChange::AddCircle { .. }))
+        .count();
+    if !patterns.is_empty() && (kind != WeaponType::MagickCircle || patterns.len() > 7) {
+        return Err(format!(
+            "{kind} accepts an explicit circle loadout of 1..=7 patterns, or an empty default list"
+        ));
+    }
+    let owned: Vec<_> = world
+        .query::<(&ChildOf, &WeaponMeta)>()
+        .iter(world)
+        .filter(|(parent, _)| parent.parent() == player)
+        .map(|(_, meta)| meta.weapon_type)
+        .collect();
+    if owned.contains(&kind) {
+        return Err(format!("{kind} is already owned"));
+    }
+    if owned.len() >= crate::inventory::MAX_WEAPONS {
+        return Err("Weapon slots are full".into());
+    }
+    spawn_weapon(&mut world.commands(), player, kind);
+    world.flush();
+    let entity = world
+        .query::<(Entity, &ChildOf, &WeaponMeta)>()
+        .iter(world)
+        .find(|(_, parent, meta)| parent.parent() == player && meta.weapon_type == kind)
+        .map(|(entity, _, _)| entity)
+        .ok_or_else(|| format!("Failed to create {kind}"))?;
+    let mut query = world.query::<(
+        &mut WeaponMeta,
+        &mut WeaponDamage,
+        &mut WeaponArea,
+        &mut WeaponCooldown,
+        Option<&mut MagickCircle>,
+    )>();
+    let (mut meta, mut damage, mut area, mut cooldown, circle) = query
+        .get_mut(world, entity)
+        .map_err(|error| error.to_string())?;
+    for change in progression.iter().flat_map(|spec| &spec.changes) {
+        apply_stat_change(change, &mut damage, &mut area, &mut cooldown);
+    }
+    meta.level = level;
+    if let Some(mut circle) = circle {
+        circle.patterns = if patterns.is_empty() {
+            vec![PatternType::Banishment; circle_count]
+        } else {
+            patterns.to_vec()
+        };
+    }
+    Ok(())
+}
+
 /// System to handle weapon firing logic
+#[expect(
+    clippy::type_complexity,
+    reason = "Auto-targeting excludes dead actors in the ECS query."
+)]
 pub fn weapon_firing_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
@@ -241,6 +416,7 @@ pub fn weapon_firing_system(
     )>,
     // Query specific weapon types for their unique properties
     magick_circle_query: Query<&MagickCircle>,
+    targets: Query<(Entity, &Transform), (With<Enemy>, Without<MarkedForDeath>)>,
 ) {
     for (weapon_entity, parent, mut cooldown, damage, area, weapon) in weapon_query.iter_mut() {
         if let Ok((cooldown_reduction, damage_multiplier, area_multiplier, player_transform)) =
@@ -253,15 +429,8 @@ pub fn weapon_firing_system(
                 .set_duration(Duration::from_secs_f32(effective_cooldown));
             cooldown.timer.tick(time.delta());
 
-            let damage_percent = ((100.0 + damage.damage_bonus as f32) / 100.0).max(0.0);
-            let effective_damage =
-                (damage.base_amount as f32 * damage_percent * damage_multiplier.factor.max(0.0))
-                    .max(0.0)
-                    .floor() as i32;
-
-            let area_percent = ((100.0 + area.area_bonus as f32) / 100.0).max(0.0);
-            let effective_radius =
-                (area.base_radius * area_percent * area_multiplier.factor.max(0.0)).max(0.0);
+            let effective_damage = damage.effective_amount(damage_multiplier.factor);
+            let effective_radius = area.effective_radius(area_multiplier.factor);
 
             if cooldown.timer.just_finished() {
                 match weapon.weapon_type {
@@ -298,6 +467,32 @@ pub fn weapon_firing_system(
                             }
                         } else {
                             warn!("Missing MagickCircle component on weapon {weapon_entity:?}");
+                        }
+                    }
+                    WeaponType::InscribedNeedles | WeaponType::AlchemicalVessel => {
+                        let origin = player_transform.translation.truncate();
+                        if let Some((_, target)) = targets
+                            .iter()
+                            .filter(|(_, transform)| {
+                                transform.translation.truncate().distance_squared(origin)
+                                    <= 720.0_f32.powi(2)
+                            })
+                            .min_by(|(entity_a, a), (entity_b, b)| {
+                                a.translation
+                                    .truncate()
+                                    .distance_squared(origin)
+                                    .total_cmp(&b.translation.truncate().distance_squared(origin))
+                                    .then_with(|| entity_a.cmp(entity_b))
+                            })
+                        {
+                            projectiles::spawn_projectile(
+                                &mut commands,
+                                origin,
+                                target.translation.truncate(),
+                                weapon.weapon_type,
+                                effective_damage,
+                                effective_radius,
+                            );
                         }
                     }
                 }

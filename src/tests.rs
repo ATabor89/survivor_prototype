@@ -81,6 +81,28 @@ pub(crate) fn state(app: &App) -> GameState {
     app.world().resource::<State<GameState>>().get().clone()
 }
 
+// Input-flow tests select an explicit offer; randomized pool coverage lives in
+// inventory_regression_tests and must not make menu tests depend on RNG order.
+pub(crate) fn set_selected_upgrade(app: &mut App, upgrade_type: upgrade::UpgradeType) -> Entity {
+    let button = app
+        .world_mut()
+        .query::<(Entity, &MenuItem)>()
+        .iter(app.world())
+        .find(|(_, item)| item.selected)
+        .map(|(entity, _)| entity)
+        .unwrap();
+    app.world_mut()
+        .entity_mut(button)
+        .insert(MenuActionComponent {
+            action: MenuAction::SelectUpgrade(menu::UpgradeChoice {
+                upgrade_type,
+                description: "Input regression offer".into(),
+                rarity: types::Rarity::Common,
+            }),
+        });
+    button
+}
+
 fn circle(app: &mut App, pattern: PatternType, position: Vec3) -> Entity {
     app.world_mut()
         .run_system_once(move |mut commands: Commands| {
@@ -821,7 +843,15 @@ fn level_up_pattern_selection_requires_a_second_confirmation() {
     step(&mut app, 2);
     assert_eq!(state(&app), GameState::LevelUp);
 
-    // The first offer is the level-3 AddCircle upgrade.
+    let spec = app
+        .world()
+        .resource::<weapons::weapon_upgrade::WeaponUpgradeConfig>()
+        .get_next_upgrades(weapons::WeaponType::MagickCircle, 2)
+        .remove(0);
+    set_selected_upgrade(
+        &mut app,
+        upgrade::UpgradeType::Weapon(weapons::WeaponType::MagickCircle, spec),
+    );
     key(&mut app, KeyCode::Enter);
     step(&mut app, 2);
     assert_eq!(state(&app), GameState::LevelUp);
@@ -866,9 +896,15 @@ fn mouse_upgrade_and_healing_survive_the_return_to_playing() {
         .unwrap()
         .current = 100;
     step(&mut app, 2);
-    let weapon_button = app.world_mut().query::<(Entity, &MenuActionComponent)>().iter(app.world())
-        .find(|(_, action)| matches!(action.action, MenuAction::SelectUpgrade(ref choice) if matches!(choice.upgrade_type, upgrade::UpgradeType::Weapon(..))))
-        .map(|(entity, _)| entity).unwrap();
+    let spec = app
+        .world()
+        .resource::<weapons::weapon_upgrade::WeaponUpgradeConfig>()
+        .get_next_upgrades(weapons::WeaponType::MagickCircle, 1)
+        .remove(0);
+    let weapon_button = set_selected_upgrade(
+        &mut app,
+        upgrade::UpgradeType::Weapon(weapons::WeaponType::MagickCircle, spec),
+    );
     app.world_mut()
         .entity_mut(weapon_button)
         .insert(Interaction::Pressed);
@@ -888,7 +924,7 @@ fn mouse_upgrade_and_healing_survive_the_return_to_playing() {
             .single(app.world())
             .unwrap()
             .damage_bonus,
-        2
+        20
     );
 
     app.world_mut().get_mut::<Health>(player).unwrap().current = 85;
@@ -896,9 +932,10 @@ fn mouse_upgrade_and_healing_survive_the_return_to_playing() {
         .resource_mut::<NextState<GameState>>()
         .set(GameState::LevelUp);
     step(&mut app, 1);
-    let heal_button = app.world_mut().query::<(Entity, &MenuActionComponent)>().iter(app.world())
-        .find(|(_, action)| matches!(action.action, MenuAction::SelectUpgrade(ref choice) if matches!(choice.upgrade_type, upgrade::UpgradeType::Generic(upgrade::GenericUpgrade::HealthPickup(_)))))
-        .map(|(entity, _)| entity).unwrap();
+    let heal_button = set_selected_upgrade(
+        &mut app,
+        upgrade::UpgradeType::Generic(upgrade::GenericUpgrade::HealthPickup(20)),
+    );
     // Clear keyboard selection to make this exercise the mouse path exclusively.
     for mut item in app
         .world_mut()

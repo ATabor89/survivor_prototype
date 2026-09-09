@@ -197,7 +197,10 @@ fn spawn_stage(commands: &mut Commands, stage: &StageDefinition) {
                     Name::new("Stage boundary"),
                     RigidBody::Fixed,
                     Collider::cuboid(wall_half.x, wall_half.y),
-                    CollisionGroups::new(WORLD_GROUP, Group::GROUP_1 | Group::GROUP_2),
+                    CollisionGroups::new(
+                        WORLD_GROUP,
+                        Group::GROUP_1 | Group::GROUP_2 | Group::GROUP_3,
+                    ),
                     Sprite::from_color(Color::srgb(0.29, 0.29, 0.26), wall_half * 2.0),
                     Transform::from_translation(center.extend(-2.0)),
                 ));
@@ -209,7 +212,10 @@ fn spawn_stage(commands: &mut Commands, stage: &StageDefinition) {
                     Name::new("Stone plinth"),
                     RigidBody::Fixed,
                     Collider::cuboid(obstacle_half.x, obstacle_half.y),
-                    CollisionGroups::new(WORLD_GROUP, Group::GROUP_1 | Group::GROUP_2),
+                    CollisionGroups::new(
+                        WORLD_GROUP,
+                        Group::GROUP_1 | Group::GROUP_2 | Group::GROUP_3,
+                    ),
                     Sprite::from_color(Color::srgb(0.3, 0.31, 0.3), obstacle_half * 2.0),
                     Transform::from_translation(Vec2::from_array(obstacle.center).extend(-1.0)),
                 ));

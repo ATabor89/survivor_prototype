@@ -7,11 +7,14 @@ use strum::IntoEnumIterator;
 use crate::components::{Enemy, Health, Player};
 use crate::content::{ActiveStage, GameContent};
 use crate::experience::{calculate_experience_needed, Experience, ExperienceOrb};
+use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveType};
 use crate::loot::LootKind;
 use crate::resources::{GameState, GameStats, GameTextures, SpawnTimer};
 use crate::weapons::magick_circle::{MagickCircle, PatternType};
 use crate::weapons::overlap::{ActiveOverlaps, EnemyCircleHits, OverlappingPatterns};
+use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig};
 use crate::weapons::{Attack, BindingEffect, InvocationPull, ProtectionBuff, WeaponCooldown};
+use crate::weapons::{WeaponMeta, WeaponType};
 use crate::GameplaySets;
 
 #[derive(Resource)]
@@ -21,6 +24,7 @@ pub struct DebugSession {
     pub tab: DebugTab,
     /// Updated by egui after drawing; gameplay input respects widget focus.
     pub wants_keyboard_input: bool,
+    pub wants_pointer_input: bool,
     /// The overlay consumed this frame's Escape/Start, even if it just closed.
     pub consumed_pause_input: bool,
     pub queued_encounters: Vec<usize>,
@@ -38,6 +42,7 @@ impl Default for DebugSession {
             pause_simulation: true,
             tab: DebugTab::Run,
             wants_keyboard_input: false,
+            wants_pointer_input: false,
             consumed_pause_input: false,
             queued_encounters: Vec::new(),
             waves: true,
@@ -47,6 +52,28 @@ impl Default for DebugSession {
             status: "Choose Run, Weapons, or World to test the current run.".into(),
         }
     }
+}
+
+impl DebugSession {
+    pub fn blocks_keyboard(&self) -> bool {
+        (self.open && self.wants_keyboard_input) || self.consumed_pause_input
+    }
+
+    pub fn blocks_pointer(&self) -> bool {
+        self.open && self.wants_pointer_input
+    }
+}
+
+/// Reset run-specific debug data without discarding the user's tool workspace.
+pub fn reset_debug_run(world: &mut World) {
+    let mut session = world.resource_mut::<DebugSession>();
+    session.waves = true;
+    session.invulnerable = false;
+    session.queued_encounters.clear();
+    session.actions.clear();
+    session.wants_keyboard_input = false;
+    session.wants_pointer_input = false;
+    session.status = "Fresh run ready; debug layout and pause preference retained.".into();
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,6 +98,12 @@ pub enum DebugAction {
     SelectStage(usize),
     SpawnPickup(LootKind),
     SpawnBreakable,
+    GrantWeapon(WeaponType),
+    GrantPassive(PassiveType),
+    ExportBuild,
+    ExportConfiguration,
+    ImportConfiguration,
+    StartConfiguredRun,
     Resume,
 }
 
@@ -89,7 +122,22 @@ impl Plugin for DebugActionsPlugin {
 pub struct DebugUiPlugin;
 impl Plugin for DebugUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(EguiPrimaryContextPass, panel);
+        app.add_systems(EguiPrimaryContextPass, panel).add_systems(
+            PreUpdate,
+            refresh_input_capture.after(bevy_egui::EguiPreUpdateSet::BeginPass),
+        );
+    }
+}
+
+fn refresh_input_capture(mut contexts: EguiContexts, mut session: ResMut<DebugSession>) {
+    if !session.open {
+        session.wants_keyboard_input = false;
+        session.wants_pointer_input = false;
+        return;
+    }
+    if let Ok(ctx) = contexts.ctx_mut() {
+        session.wants_keyboard_input = ctx.egui_wants_keyboard_input();
+        session.wants_pointer_input = ctx.egui_wants_pointer_input();
     }
 }
 
@@ -102,12 +150,6 @@ fn toggle_panel(
     weapons: Query<&MagickCircle>,
 ) {
     session.consumed_pause_input = false;
-    // Selection and result screens own input and always take priority.
-    if !matches!(state.get(), GameState::Playing | GameState::DebugTools) {
-        session.open = false;
-        session.wants_keyboard_input = false;
-        return;
-    }
     let close = session.open
         && (keys.just_pressed(KeyCode::F1)
             || keys.just_pressed(KeyCode::Escape)
@@ -117,6 +159,7 @@ fn toggle_panel(
     if close {
         session.open = false;
         session.wants_keyboard_input = false;
+        session.wants_pointer_input = false;
         session.consumed_pause_input = true;
         if *state.get() == GameState::DebugTools {
             next.set(GameState::Playing);
@@ -126,16 +169,13 @@ fn toggle_panel(
     if keys.just_pressed(KeyCode::F1) || keys.just_pressed(KeyCode::F2) {
         if !session.open {
             session.open = true;
-            session.pause_simulation = true;
             if let Ok(circle) = weapons.single() {
                 session.patterns = circle.patterns.clone();
             }
         }
-        session.tab = if keys.just_pressed(KeyCode::F2) {
-            DebugTab::Weapons
-        } else {
-            DebugTab::Run
-        };
+        if keys.just_pressed(KeyCode::F2) {
+            session.tab = DebugTab::Weapons;
+        }
     }
     if session.open {
         match (state.get(), session.pause_simulation) {
@@ -178,18 +218,40 @@ fn clear_effects(world: &mut World) {
 pub fn apply_actions(world: &mut World) {
     flush_encounter_requests(world);
     let actions = std::mem::take(&mut world.resource_mut::<DebugSession>().actions);
-    if !world.resource::<DebugSession>().open
-        || !matches!(
-            world.resource::<State<GameState>>().get(),
-            GameState::DebugTools | GameState::Playing
-        )
-    {
+    if !world.resource::<DebugSession>().open {
         return;
     }
     for action in actions {
+        let state = world.resource::<State<GameState>>().get();
+        let has_run = matches!(
+            state,
+            GameState::Playing
+                | GameState::DebugTools
+                | GameState::Paused
+                | GameState::LevelUp
+                | GameState::Treasure
+        );
+        let available = match &action {
+            DebugAction::SelectStage(_)
+            | DebugAction::Resume
+            | DebugAction::ExportBuild
+            | DebugAction::ExportConfiguration
+            | DebugAction::ImportConfiguration
+            | DebugAction::StartConfiguredRun => true,
+            DebugAction::TestVictory => matches!(state, GameState::Playing | GameState::DebugTools),
+            _ => has_run,
+        };
+        if !available {
+            continue;
+        }
         match action {
             DebugAction::ApplyBuild(patterns) => {
-                if patterns.is_empty() || patterns.len() > 6 {
+                if patterns.is_empty() || patterns.len() > 7 {
+                    continue;
+                }
+                if world.query::<&MagickCircle>().iter(world).next().is_none() {
+                    world.resource_mut::<DebugSession>().status =
+                        "This build does not own Magick Circle.".into();
                     continue;
                 }
                 for mut circle in world.query::<&mut MagickCircle>().iter_mut(world) {
@@ -277,7 +339,13 @@ pub fn apply_actions(world: &mut World) {
                 {
                     xp.current = xp.current.max(calculate_experience_needed(xp.level));
                 }
-                close_panel(world);
+                // Only release a debug pause. Natural selection/treasure/pause
+                // states retain ownership and process the banked XP on resume.
+                if *world.resource::<State<GameState>>().get() == GameState::DebugTools {
+                    world
+                        .resource_mut::<NextState<GameState>>()
+                        .set(GameState::Playing);
+                }
             }
             DebugAction::AdvanceWave => {
                 let duration = world
@@ -333,25 +401,96 @@ pub fn apply_actions(world: &mut World) {
                 world
                     .resource_mut::<crate::resources::GameStats>()
                     .time_elapsed = duration;
-                close_panel(world);
+                world
+                    .resource_mut::<NextState<GameState>>()
+                    .set(GameState::Playing);
             }
             DebugAction::SelectStage(index) => {
-                if index < world.resource::<GameContent>().stages.len() {
-                    world.resource_mut::<ActiveStage>().0 = index;
-                    let mut session = world.resource_mut::<DebugSession>();
-                    session.open = false;
-                    session.queued_encounters.clear();
-                    world
-                        .resource_mut::<NextState<GameState>>()
-                        .set(GameState::Restarting);
+                if let Some(stage) = world
+                    .resource::<GameContent>()
+                    .stages
+                    .get(index)
+                    .map(|stage| stage.id.clone())
+                {
+                    world.resource_mut::<crate::setup::RunConfiguration>().stage = stage;
+                    configuration_result(world, crate::setup::start_configured_run);
                 }
             }
             DebugAction::SpawnPickup(kind) => spawn_world_test_object(world, Some(kind)),
             DebugAction::SpawnBreakable => spawn_world_test_object(world, None),
+            DebugAction::GrantWeapon(kind) => {
+                let result = grant_debug_weapon(world, kind);
+                world.resource_mut::<DebugSession>().status =
+                    result.map_or_else(|error| error, |()| format!("{kind} added or upgraded."));
+            }
+            DebugAction::GrantPassive(kind) => {
+                let player = world.query_filtered::<Entity, With<Player>>().single(world);
+                let result = player
+                    .map_err(|_| "No active player.".to_string())
+                    .and_then(|player| crate::inventory::grant_passive(world, player, kind));
+                world.resource_mut::<DebugSession>().status =
+                    result.map_or_else(|error| error, |()| "Passive added or upgraded.".into());
+            }
+            DebugAction::ExportBuild => {
+                configuration_result(world, crate::setup::export_current_build)
+            }
+            DebugAction::ExportConfiguration => {
+                configuration_result(world, crate::setup::export_configuration)
+            }
+            DebugAction::ImportConfiguration => {
+                configuration_result(world, crate::setup::import_configuration)
+            }
+            DebugAction::StartConfiguredRun => {
+                configuration_result(world, crate::setup::start_configured_run)
+            }
             DebugAction::Resume => close_panel(world),
         }
     }
     flush_encounter_requests(world);
+}
+
+fn grant_debug_weapon(world: &mut World, kind: WeaponType) -> Result<(), String> {
+    let player = world
+        .query_filtered::<Entity, With<Player>>()
+        .single(world)
+        .map_err(|_| "No active player.".to_string())?;
+    let level = world
+        .query::<(&WeaponMeta, &ChildOf)>()
+        .iter(world)
+        .find(|(weapon, parent)| weapon.weapon_type == kind && parent.parent() == player)
+        .map(|(weapon, _)| weapon.level);
+    if let Some(level) = level {
+        let Some(mut spec) = world
+            .resource::<WeaponUpgradeConfig>()
+            .get_next_upgrades(kind, level)
+            .into_iter()
+            .next()
+        else {
+            return Err(format!("{kind} is already at its maximum level."));
+        };
+        for change in &mut spec.changes {
+            if let WeaponUpgradeChange::AddCircle { pattern } = change {
+                if pattern.is_none() {
+                    *pattern = Some(PatternType::Banishment);
+                }
+            }
+        }
+        world.write_message(crate::menu::WeaponUpgradeConfirmedEvent {
+            weapon_type: kind,
+            upgrade_spec: spec,
+        });
+        Ok(())
+    } else {
+        crate::weapons::grant_configured_weapon(world, player, kind, 1, &[])
+    }
+}
+
+fn configuration_result(world: &mut World, action: fn(&mut World) -> Result<(), String>) {
+    let result = action(world);
+    world.resource_mut::<DebugSession>().status = match result {
+        Ok(()) => "Configuration action completed.".into(),
+        Err(error) => error,
+    };
 }
 
 fn spawn_world_test_object(world: &mut World, pickup: Option<LootKind>) {
@@ -422,10 +561,13 @@ fn close_panel(world: &mut World) {
     let mut session = world.resource_mut::<DebugSession>();
     session.open = false;
     session.wants_keyboard_input = false;
+    session.wants_pointer_input = false;
     session.consumed_pause_input = true;
-    world
-        .resource_mut::<NextState<GameState>>()
-        .set(GameState::Playing);
+    if *world.resource::<State<GameState>>().get() == GameState::DebugTools {
+        world
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::Playing);
+    }
 }
 
 #[expect(
@@ -442,8 +584,16 @@ fn panel(
     content: Res<GameContent>,
     active_stage: Res<ActiveStage>,
     stats: Res<GameStats>,
+    players: Query<&Health, With<Player>>,
+    circles: Query<&MagickCircle>,
+    weapons: Query<&WeaponMeta>,
+    passives: Query<&PassiveInventory, With<Player>>,
+    passive_catalog: Res<PassiveCatalog>,
+    upgrade_config: Res<WeaponUpgradeConfig>,
+    active_config: Res<crate::setup::ActiveRunConfig>,
 ) -> Result {
     session.wants_keyboard_input = false;
+    session.wants_pointer_input = false;
     let ctx = contexts.ctx_mut()?;
     if *state.get() == GameState::Playing {
         egui::Area::new("debug_hint".into())
@@ -456,9 +606,19 @@ fn panel(
                 }
             });
     }
-    if !session.open || !matches!(state.get(), GameState::Playing | GameState::DebugTools) {
+    if !session.open {
         return Ok(());
     }
+    let has_player = players.single().is_ok_and(|health| health.current > 0);
+    let active_run = has_player
+        && matches!(
+            state.get(),
+            GameState::Playing
+                | GameState::DebugTools
+                | GameState::Paused
+                | GameState::LevelUp
+                | GameState::Treasure
+        );
     let mut window_open = true;
     egui::Window::new("Debug menu")
         .open(&mut window_open)
@@ -489,18 +649,28 @@ fn panel(
                 }
             });
             ui.small("F1 / Escape closes. F2 opens Weapons. Live mode keeps this menu open.");
+            ui.small(format!("Run seed: {}", active_config.0.seed));
+            if !matches!(state.get(), GameState::Playing | GameState::DebugTools) {
+                ui.small("The game screen keeps its own pause. Debug controls remain available where applicable.");
+            }
             ui.separator();
             match session.tab {
                 DebugTab::Run => {
-                    draw_run_controls(ui, &mut session, &content, &active_stage, &stats)
+                    draw_run_controls(ui, &mut session, &content, &active_stage, &stats, active_run, has_player, matches!(state.get(), GameState::Playing | GameState::DebugTools))
                 }
-                DebugTab::Weapons => draw_weapon_controls(ui, &mut session),
+                DebugTab::Weapons => {
+                    ui.add_enabled_ui(active_run, |ui| draw_inventory_controls(ui, &mut session, &weapons, passives.single().ok(), &passive_catalog, &upgrade_config));
+                    ui.separator();
+                    if circles.is_empty() { ui.label("Acquire Magick Circle to edit its pattern layout. Other weapons retain their own attack behavior."); }
+                    ui.add_enabled_ui(active_run && !circles.is_empty(), |ui| draw_weapon_controls(ui, &mut session));
+                }
                 DebugTab::World => draw_world_controls(
                     ui,
                     &mut session,
                     debug_render.as_deref_mut(),
                     &content,
                     active_stage.0,
+                    active_run,
                 ),
             }
             ui.separator();
@@ -518,15 +688,23 @@ fn panel(
         session.actions.push(DebugAction::Resume);
     }
     session.wants_keyboard_input = window_open && ctx.egui_wants_keyboard_input();
+    session.wants_pointer_input = window_open && ctx.egui_wants_pointer_input();
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Run controls expose contextual capabilities separately from their data."
+)]
 fn draw_run_controls(
     ui: &mut egui::Ui,
     session: &mut DebugSession,
     content: &GameContent,
     active: &ActiveStage,
     stats: &GameStats,
+    active_run: bool,
+    has_player: bool,
+    can_test_victory: bool,
 ) {
     ui.heading("Run controls");
     let stage = content.stage(active);
@@ -539,6 +717,7 @@ fn draw_run_controls(
         seconds % 60,
         stage.schedule.len()
     ));
+    ui.add_enabled_ui(active_run, |ui| {
     ui.checkbox(&mut session.waves, "Natural enemy spawns");
     ui.checkbox(&mut session.invulnerable, "Player invulnerable");
     ui.horizontal(|ui| {
@@ -556,11 +735,11 @@ fn draw_run_controls(
         if ui.button("Next phase").clicked() {
             session.actions.push(DebugAction::AdvancePhase);
         }
-        if ui.button("Test victory").clicked() {
+        if ui.add_enabled(can_test_victory, egui::Button::new("Test victory")).clicked() {
             session.actions.push(DebugAction::TestVictory);
         }
     });
-    ui.small("Level and victory shortcuts close the menu to use the normal game flow.");
+    ui.small("Grant level keeps this menu open. Selection and treasure screens keep their pending choices.");
     if !stage.encounters.is_empty() {
         ui.separator();
         ui.label("Authored encounters");
@@ -580,6 +759,84 @@ fn draw_run_controls(
                 session.actions.push(DebugAction::TriggerEncounter(index));
             }
         }
+    }
+    });
+    ui.separator();
+    ui.label("Run configuration (run-config.ron)");
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(has_player, egui::Button::new("Export current build"))
+            .clicked()
+        {
+            session.actions.push(DebugAction::ExportBuild);
+        }
+        if ui.button("Export configuration").clicked() {
+            session.actions.push(DebugAction::ExportConfiguration);
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Import configuration").clicked() {
+            session.actions.push(DebugAction::ImportConfiguration);
+        }
+        if ui.button("Start configured run").clicked() {
+            session.actions.push(DebugAction::StartConfiguredRun);
+        }
+    });
+}
+
+fn draw_inventory_controls(
+    ui: &mut egui::Ui,
+    session: &mut DebugSession,
+    weapons: &Query<&WeaponMeta>,
+    passives: Option<&PassiveInventory>,
+    catalog: &PassiveCatalog,
+    config: &WeaponUpgradeConfig,
+) {
+    ui.heading("Weapon slots");
+    for kind in WeaponType::iter() {
+        let level = weapons
+            .iter()
+            .find(|weapon| weapon.weapon_type == kind)
+            .map_or(0, |weapon| weapon.level);
+        let max = config.max_level(kind);
+        ui.horizontal(|ui| {
+            ui.label(format!("{kind}   Lv. {level}/{max}"));
+            if ui
+                .add_enabled(
+                    level < max
+                        && (level > 0 || weapons.iter().count() < crate::inventory::MAX_WEAPONS),
+                    egui::Button::new(if level == 0 { "Add" } else { "Upgrade" }),
+                )
+                .clicked()
+            {
+                session.actions.push(DebugAction::GrantWeapon(kind));
+            }
+        });
+        ui.small(format!("{} · {}", kind.family(), kind.summary()));
+    }
+    ui.separator();
+    ui.heading("Passive slots");
+    for kind in PassiveType::iter() {
+        let definition = catalog.get(kind);
+        let level = passives.map_or(0, |inventory| inventory.level(kind));
+        let available = passives.is_some_and(|inventory| inventory.can_upgrade(kind, catalog));
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "{}   Lv. {level}/{}",
+                definition.name,
+                definition.max_level()
+            ));
+            if ui
+                .add_enabled(
+                    available,
+                    egui::Button::new(if level == 0 { "Add" } else { "Upgrade" }),
+                )
+                .clicked()
+            {
+                session.actions.push(DebugAction::GrantPassive(kind));
+            }
+        });
+        ui.small(&definition.description);
     }
 }
 
@@ -616,7 +873,7 @@ fn draw_weapon_controls(ui: &mut egui::Ui, session: &mut DebugSession) {
     }
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(session.patterns.len() < 6, egui::Button::new("Add circle"))
+            .add_enabled(session.patterns.len() < 7, egui::Button::new("Add circle"))
             .clicked()
         {
             session.patterns.push(PatternType::Banishment);
@@ -656,6 +913,7 @@ fn draw_world_controls(
     debug_render: Option<&mut bevy_rapier2d::render::DebugRenderContext>,
     content: &GameContent,
     active_stage: usize,
+    active_run: bool,
 ) {
     ui.heading("World controls");
     ui.label("Stage (starts a fresh run)");
@@ -668,26 +926,28 @@ fn draw_world_controls(
         }
     }
     ui.separator();
-    ui.horizontal(|ui| {
-        if ui.button("Test chest").clicked() {
-            session
-                .actions
-                .push(DebugAction::SpawnPickup(LootKind::Chest));
+    ui.add_enabled_ui(active_run, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Test chest").clicked() {
+                session
+                    .actions
+                    .push(DebugAction::SpawnPickup(LootKind::Chest));
+            }
+            if ui.button("Healing pickup").clicked() {
+                session
+                    .actions
+                    .push(DebugAction::SpawnPickup(LootKind::Healing));
+            }
+            if ui.button("Test urn").clicked() {
+                session.actions.push(DebugAction::SpawnBreakable);
+            }
+        });
+        if let Some(render) = debug_render {
+            ui.checkbox(&mut render.enabled, "Show physics colliders");
         }
-        if ui.button("Healing pickup").clicked() {
-            session
-                .actions
-                .push(DebugAction::SpawnPickup(LootKind::Healing));
+        if ui.button("Clear arena").clicked() {
+            session.actions.push(DebugAction::ClearArena);
         }
-        if ui.button("Test urn").clicked() {
-            session.actions.push(DebugAction::SpawnBreakable);
-        }
+        ui.small("Clears enemies, gems, circles, and effects. Your build and progression remain.");
     });
-    if let Some(render) = debug_render {
-        ui.checkbox(&mut render.enabled, "Show physics colliders");
-    }
-    if ui.button("Clear arena").clicked() {
-        session.actions.push(DebugAction::ClearArena);
-    }
-    ui.small("Clears enemies, gems, circles, and effects. Your build and progression remain.");
 }

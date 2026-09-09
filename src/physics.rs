@@ -49,9 +49,18 @@ impl Plugin for PhysicsPlugin {
     }
 }
 
-fn configure_physics(mut configurations: Query<&mut RapierConfiguration>) {
-    for mut configuration in &mut configurations {
+fn configure_physics(
+    mut configurations: Query<(&mut RapierConfiguration, &mut RapierContextSimulation)>,
+) {
+    for (mut configuration, mut simulation) in &mut configurations {
         configuration.gravity = Vec2::ZERO;
+        // World coordinates are pixels. Rapier's default 400-unit speed limit
+        // would silently slow the 720 px/s Needles. Configure its native limit
+        // without changing the contact tolerances of the existing world scale.
+        simulation
+            .integration_parameters
+            .normalized_max_linear_velocity =
+            2000.0 / simulation.integration_parameters.length_unit;
     }
 }
 fn verify_physics_config(

@@ -4,15 +4,19 @@ use crate::components::{CooldownReduction, Health, Player};
 use crate::content::{ActiveStage, GameContent};
 use crate::death::{MarkedForDeath, MarkedForDespawn};
 use crate::events::EntityDeathEvent;
-use crate::menu::WeaponUpgradeConfirmedEvent;
+use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveUpgradeEvent};
+use crate::menu::{GenericUpgradeConfirmedEvent, WeaponUpgradeConfirmedEvent};
 use crate::resources::{GameState, GameStats};
 use crate::run::RunEntity;
+use crate::setup::RunRng;
+use crate::upgrade::{GenericUpgrade, UpgradeType};
 use crate::weapons::magick_circle::PatternType;
-use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig, WeaponUpgradeSpec};
+use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig};
 use crate::weapons::{WeaponCooldown, WeaponMeta, WeaponType};
 use crate::GameplaySets;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use rand::{Rng, RngExt};
 use strum::IntoEnumIterator;
 
 pub const BREAKABLE_GROUP: Group = Group::GROUP_6;
@@ -51,8 +55,7 @@ impl Default for LootDirector {
 
 #[derive(Clone, Debug)]
 pub struct TreasureReward {
-    pub weapon: WeaponType,
-    pub upgrade: WeaponUpgradeSpec,
+    pub upgrade: UpgradeType,
     pub description: String,
 }
 
@@ -135,6 +138,11 @@ pub(crate) fn spawn_breakable(
                 maximum: health.max(1),
             },
             Sprite::from_color(color, size),
+            crate::art::ItemIcon(if lower.contains("candle") || lower.contains("lantern") {
+                11
+            } else {
+                10
+            }),
             Transform::from_translation(position.extend(1.0)),
             RigidBody::Fixed,
             Collider::ball(14.0),
@@ -142,16 +150,6 @@ pub(crate) fn spawn_breakable(
             ActiveCollisionTypes::STATIC_STATIC,
             CollisionGroups::new(BREAKABLE_GROUP, Group::GROUP_3),
         ))
-        .with_children(|prop| {
-            prop.spawn((
-                Sprite::from_color(Color::srgb(0.95, 0.85, 0.54), Vec2::new(size.x * 0.65, 5.0)),
-                Transform::from_xyz(0.0, size.y * 0.3, 0.1),
-            ));
-            prop.spawn((
-                Sprite::from_color(Color::srgb(0.22, 0.19, 0.16), Vec2::new(size.x + 5.0, 5.0)),
-                Transform::from_xyz(0.0, -size.y * 0.45, 0.1),
-            ));
-        })
         .id()
 }
 
@@ -175,6 +173,11 @@ pub(crate) fn spawn_loot(commands: &mut Commands, position: Vec2, kind: LootKind
             kind,
             Name::new(name),
             Sprite::from_color(color, size),
+            crate::art::ItemIcon(match kind {
+                LootKind::Healing => 7,
+                LootKind::Chest => 8,
+                LootKind::Gold => 9,
+            }),
             Transform::from_translation(position.extend(2.0)),
             RigidBody::Fixed,
             Collider::ball(12.0),
@@ -182,18 +185,6 @@ pub(crate) fn spawn_loot(commands: &mut Commands, position: Vec2, kind: LootKind
             ActiveCollisionTypes::KINEMATIC_STATIC,
             CollisionGroups::new(Group::GROUP_4, Group::GROUP_1),
         ))
-        .with_children(|item| {
-            let trim = if kind == LootKind::Healing {
-                Vec2::new(8.0, 6.0)
-            } else {
-                Vec2::new(5.0, size.y + 2.0)
-            };
-            let y = if kind == LootKind::Healing { 11.0 } else { 0.0 };
-            item.spawn((
-                Sprite::from_color(Color::srgb(1.0, 0.91, 0.60), trim),
-                Transform::from_xyz(0.0, y, 0.1),
-            ));
-        })
         .id()
 }
 
@@ -211,6 +202,7 @@ fn replenish_props(
     camera: Query<(&Transform, &Projection), With<GameCamera>>,
     props: Query<(Entity, &Transform), With<Breakable>>,
     context: ReadRapierContext,
+    mut rng: ResMut<RunRng>,
 ) {
     let stage = content.stage(&active);
     if !director.seeded {
@@ -256,9 +248,9 @@ fn replenish_props(
     for _ in count..config.count {
         let mut candidate = None;
         for _ in 0..24 {
-            let side = rand::random::<u32>() % 4;
-            let along = rand::random::<f32>() * 2.0 - 1.0;
-            let distance = 80.0 + rand::random::<f32>() * 240.0;
+            let side = rng.loot.random_range(0..4);
+            let along = rng.loot.random_range(-1.0..1.0);
+            let distance = rng.loot.random_range(80.0..320.0);
             let offset = match side {
                 0 => Vec2::new(-view.x - distance, along * (view.y + 120.0)),
                 1 => Vec2::new(view.x + distance, along * (view.y + 120.0)),
@@ -299,9 +291,9 @@ fn replenish_props(
         };
         let name = config
             .names
-            .get(rand::random::<u32>() as usize % config.names.len().max(1))
+            .get(rng.loot.random_range(0..config.names.len().max(1)))
             .map_or("Clay urn", String::as_str);
-        let drop = if rand::random::<f32>() < 0.35 {
+        let drop = if rng.loot.random::<f32>() < 0.35 {
             LootKind::Healing
         } else {
             LootKind::Gold
@@ -323,6 +315,7 @@ fn drop_loot(
     props: Query<&Breakable>,
     bosses: Query<(), With<ChestDrop>>,
     pickups: Query<&LootKind>,
+    mut rng: ResMut<RunRng>,
 ) {
     let mut loose_count = pickups
         .iter()
@@ -332,7 +325,7 @@ fn drop_loot(
         if bosses.contains(event.entity) {
             spawn_loot(&mut commands, event.position, LootKind::Chest);
         } else if let Ok(prop) = props.get(event.entity) {
-            if loose_count < MAX_LOOSE_PICKUPS && rand::random::<f32>() < prop.drop_chance {
+            if loose_count < MAX_LOOSE_PICKUPS && rng.loot.random::<f32>() < prop.drop_chance {
                 spawn_loot(&mut commands, event.position, prop.drop);
                 loose_count += 1;
             }
@@ -349,65 +342,99 @@ struct SimulatedWeapon {
 
 fn roll_rewards(
     config: &WeaponUpgradeConfig,
+    catalog: &PassiveCatalog,
     weapons: &mut [SimulatedWeapon],
+    passives: &mut PassiveInventory,
     count: usize,
     player_reduction: f32,
+    rng: &mut impl Rng,
 ) -> Vec<TreasureReward> {
     let patterns: Vec<_> = PatternType::iter().collect();
     let mut rewards = Vec::new();
     for _ in 0..count {
-        if weapons.is_empty() {
-            break;
-        }
-        let index = rand::random::<u32>() as usize % weapons.len();
-        let weapon = &mut weapons[index];
-        let cooldown = WeaponCooldown {
-            base_duration: weapon.base_duration,
-            cooldown_bonus: weapon.cooldown_bonus,
-            ..default()
-        };
-        let offers: Vec<_> = config
-            .get_next_upgrades(weapon.weapon, weapon.level)
-            .into_iter()
-            .filter(|offer| {
-                !offer
+        let mut offers = Vec::new();
+        for weapon in weapons.iter() {
+            let cooldown = WeaponCooldown {
+                base_duration: weapon.base_duration,
+                cooldown_bonus: weapon.cooldown_bonus,
+                ..default()
+            };
+            for upgrade in config.get_next_upgrades(weapon.weapon, weapon.level) {
+                if !upgrade
                     .changes
                     .iter()
                     .all(|change| matches!(change, WeaponUpgradeChange::Cooldown(_)))
                     || cooldown.effective_seconds(player_reduction) > WeaponCooldown::MIN_SECONDS
-            })
-            .collect();
-        if offers.is_empty() {
-            continue;
-        }
-        let mut upgrade = offers[rand::random::<u32>() as usize % offers.len()].clone();
-        for change in &mut upgrade.changes {
-            match change {
-                WeaponUpgradeChange::AddCircle { pattern } if pattern.is_none() => {
-                    *pattern = Some(patterns[rand::random::<u32>() as usize % patterns.len()]);
+                {
+                    offers.push(UpgradeType::Weapon(weapon.weapon, upgrade));
                 }
-                WeaponUpgradeChange::Cooldown(bonus) => {
-                    weapon.cooldown_bonus = weapon.cooldown_bonus.saturating_add(*bonus);
-                }
-                _ => {}
             }
         }
-        weapon.level = weapon.level.saturating_add(1);
-        let changes = upgrade
-            .changes
-            .iter()
-            .map(|change| match change {
-                WeaponUpgradeChange::AddCircle {
-                    pattern: Some(pattern),
-                } => format!("Add {pattern} circle"),
-                _ => change.to_string(),
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
+        for item in &passives.items {
+            if item.level < catalog.get(item.kind).max_level() {
+                offers.push(UpgradeType::Passive(item.kind, item.level + 1));
+            }
+        }
+        let mut upgrade = if offers.is_empty() {
+            UpgradeType::Generic(GenericUpgrade::GoldPickup(25))
+        } else {
+            offers.swap_remove(rng.random_range(0..offers.len()))
+        };
+        // Simulate each awarded level before rolling again. A multi-reward chest
+        // follows real progression and cannot award the same capped level twice.
+        let description = match &mut upgrade {
+            UpgradeType::Weapon(kind, spec) => {
+                let weapon = weapons
+                    .iter_mut()
+                    .find(|weapon| weapon.weapon == *kind)
+                    .expect("owned weapon reward");
+                for change in &mut spec.changes {
+                    match change {
+                        WeaponUpgradeChange::AddCircle { pattern } if pattern.is_none() => {
+                            *pattern = Some(patterns[rng.random_range(0..patterns.len())])
+                        }
+                        WeaponUpgradeChange::Cooldown(bonus) => {
+                            weapon.cooldown_bonus = weapon.cooldown_bonus.saturating_add(*bonus)
+                        }
+                        _ => {}
+                    }
+                }
+                weapon.level += 1;
+                let changes = spec
+                    .changes
+                    .iter()
+                    .map(|change| match change {
+                        WeaponUpgradeChange::AddCircle {
+                            pattern: Some(pattern),
+                        } => format!("Add {pattern} circle"),
+                        _ => change.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!("{} level {}: {changes}", weapon.weapon, weapon.level)
+            }
+            UpgradeType::Passive(kind, level) => {
+                passives
+                    .items
+                    .iter_mut()
+                    .find(|item| item.kind == *kind)
+                    .expect("owned passive reward")
+                    .level = *level;
+                let definition = catalog.get(*kind);
+                format!(
+                    "{} - {}",
+                    definition.name,
+                    definition.level_description(*level)
+                )
+            }
+            UpgradeType::Generic(GenericUpgrade::GoldPickup(amount)) => {
+                format!("Gold purse: +{amount} gold")
+            }
+            _ => unreachable!("chests upgrade owned items or award gold"),
+        };
         rewards.push(TreasureReward {
-            weapon: weapon.weapon,
             upgrade,
-            description: format!("{} level {}: {changes}", weapon.weapon, weapon.level),
+            description,
         });
     }
     rewards
@@ -438,6 +465,9 @@ fn collect_loot(
     mut pending: ResMut<PendingTreasure>,
     mut next: ResMut<NextState<GameState>>,
     context: ReadRapierContext,
+    catalog: Res<PassiveCatalog>,
+    passives: Query<&PassiveInventory, With<Player>>,
+    mut rng: ResMut<RunRng>,
 ) {
     let Ok((player, mut health, reduction)) = players.single_mut() else {
         return;
@@ -482,7 +512,7 @@ fn collect_loot(
                         base_duration: cooldown.base_duration,
                     })
                     .collect();
-                let roll = rand::random::<f32>();
+                let roll = rng.upgrades.random::<f32>();
                 let count = if roll < 0.05 {
                     5
                 } else if roll < 0.30 {
@@ -490,7 +520,16 @@ fn collect_loot(
                 } else {
                     1
                 };
-                let rewards = roll_rewards(&config, &mut candidates, count, reduction.percent);
+                let mut simulated_passives = passives.get(player).cloned().unwrap_or_default();
+                let rewards = roll_rewards(
+                    &config,
+                    &catalog,
+                    &mut candidates,
+                    &mut simulated_passives,
+                    count,
+                    reduction.percent,
+                    &mut rng.upgrades,
+                );
                 if rewards.is_empty() {
                     continue;
                 }
@@ -545,7 +584,7 @@ fn spawn_treasure_overlay(mut commands: Commands, pending: Res<PendingTreasure>)
                     ));
                     panel.spawn((
                         Text::new(format!(
-                            "{} weapon upgrade{}",
+                            "{} treasure reward{}",
                             pending.rewards.len(),
                             if pending.rewards.len() == 1 { "" } else { "s" }
                         )),
@@ -598,6 +637,10 @@ fn spawn_treasure_overlay(mut commands: Commands, pending: Res<PendingTreasure>)
         });
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Treasure confirmation routes typed reward messages to their owning systems."
+)]
 fn treasure_input(
     mut pending: ResMut<PendingTreasure>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -605,19 +648,29 @@ fn treasure_input(
     button: Query<&Interaction, (With<TreasureButton>, Changed<Interaction>)>,
     mut upgrades: MessageWriter<WeaponUpgradeConfirmedEvent>,
     mut next: ResMut<NextState<GameState>>,
+    players: Query<Entity, With<Player>>,
+    mut passives: MessageWriter<PassiveUpgradeEvent>,
+    mut generics: MessageWriter<GenericUpgradeConfirmedEvent>,
+    #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
     if !pending.input_ready {
         pending.input_ready = true;
         return;
     }
-    let activate = keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::Space)
-        || gamepads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::South))
-        || button
-            .iter()
-            .any(|interaction| *interaction == Interaction::Pressed);
+    #[cfg(feature = "dev-tools")]
+    let (keyboard_allowed, pointer_allowed) = (!debug.blocks_keyboard(), !debug.blocks_pointer());
+    #[cfg(not(feature = "dev-tools"))]
+    let (keyboard_allowed, pointer_allowed) = (true, true);
+    let activate = (keyboard_allowed
+        && (keyboard.just_pressed(KeyCode::Enter)
+            || keyboard.just_pressed(KeyCode::Space)
+            || gamepads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::South))))
+        || (pointer_allowed
+            && button
+                .iter()
+                .any(|interaction| *interaction == Interaction::Pressed));
     if !activate {
         return;
     }
@@ -625,10 +678,29 @@ fn treasure_input(
         pending.revealed = pending.rewards.len();
     } else {
         for reward in pending.rewards.drain(..) {
-            upgrades.write(WeaponUpgradeConfirmedEvent {
-                weapon_type: reward.weapon,
-                upgrade_spec: reward.upgrade,
-            });
+            match reward.upgrade {
+                UpgradeType::Weapon(weapon_type, upgrade_spec) => {
+                    upgrades.write(WeaponUpgradeConfirmedEvent {
+                        weapon_type,
+                        upgrade_spec,
+                    });
+                }
+                UpgradeType::Passive(kind, level) => {
+                    if let Ok(player) = players.single() {
+                        passives.write(PassiveUpgradeEvent {
+                            player,
+                            kind,
+                            level,
+                        });
+                    }
+                }
+                UpgradeType::Generic(generic_upgrade_type) => {
+                    generics.write(GenericUpgradeConfirmedEvent {
+                        generic_upgrade_type,
+                    });
+                }
+                UpgradeType::AcquireWeapon(_) => unreachable!("treasure only upgrades owned items"),
+            }
         }
         next.set(GameState::Playing);
     }

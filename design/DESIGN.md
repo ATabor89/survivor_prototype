@@ -1,5 +1,9 @@
 # Survivors Prototype - Design Document
 
+> **Current implementation:** [Builds, recipes, and persistent tools](BUILD-DIVERSITY.md)
+> and [authored stages](STAGE-CONTENT.md) supersede the implementation snapshot below.
+> The older sections preserve the original design history; their status table is historical.
+
 > **Implementation summary updated:** 2026-09-09 (survival-run baseline; game design remains provisional)
 > **Branch:** `codex/survival-run`
 > **Engine:** Bevy 0.19.1 (Rust 1.95+, tested with 1.96)

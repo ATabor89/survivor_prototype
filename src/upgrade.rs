@@ -1,4 +1,5 @@
 use crate::components::{Health, Luck, Player};
+use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveType, MAX_WEAPONS};
 use crate::menu;
 use crate::menu::{
     GenericUpgradeConfirmedEvent, MenuAction, MenuActionComponent, MenuItem, UpgradeChoice,
@@ -11,11 +12,12 @@ use bevy::color::{Alpha, Color};
 use bevy::log::info;
 use bevy::prelude::*;
 use rand::prelude::*;
-use std::cmp::Ordering;
+use strum::IntoEnumIterator;
 
 pub fn handle_generic_upgrade(
     mut upgrade_events: MessageReader<GenericUpgradeConfirmedEvent>,
     mut player_query: Query<&mut Health, With<Player>>,
+    mut stats: ResMut<crate::resources::GameStats>,
 ) {
     for generic_upgrade_event in upgrade_events.read() {
         match generic_upgrade_event.generic_upgrade_type {
@@ -31,6 +33,7 @@ pub fn handle_generic_upgrade(
                     health.current = new_health;
                 }
             }
+            GenericUpgrade::GoldPickup(amount) => stats.gold = stats.gold.saturating_add(amount),
         }
     }
 }
@@ -41,12 +44,14 @@ pub struct UpgradePool;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GenericUpgrade {
     HealthPickup(i32), // Amount to heal
+    GoldPickup(u32),
 }
 
 impl std::fmt::Display for GenericUpgrade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GenericUpgrade::HealthPickup(_) => write!(f, "Philosopher's Elixir"),
+            GenericUpgrade::GoldPickup(_) => write!(f, "Gold purse"),
         }
     }
 }
@@ -54,6 +59,8 @@ impl std::fmt::Display for GenericUpgrade {
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpgradeType {
     Weapon(WeaponType, WeaponUpgradeSpec),
+    AcquireWeapon(WeaponType),
+    Passive(PassiveType, u8),
     Generic(GenericUpgrade),
 }
 
@@ -106,37 +113,47 @@ impl UpgradePool {
         weapon_upgrade_config: &WeaponUpgradeConfig,
         luck: &Luck,
         weapons: &[&WeaponMeta],
+        passives: &PassiveInventory,
+        catalog: &PassiveCatalog,
+        rng: &mut impl Rng,
     ) -> Vec<UpgradeChoice> {
-        let mut rng = rand::rng();
-
-        // Determine the number of upgrades to show
-        let count = Self::calculate_count(luck, &mut rng);
-
-        // Generate weapon-specific upgrades
+        let count = Self::calculate_count(luck, rng);
         let mut choices = Self::generate_weapon_upgrades(weapon_upgrade_config, weapons);
-
-        // Adjust the list to ensure the correct count
-        match choices.len().cmp(&count) {
-            Ordering::Greater => {
-                // Randomly select the required number of upgrades
-                choices = Self::select_random_owned(choices, count, &mut rng);
+        if weapons.len() < MAX_WEAPONS {
+            for weapon in WeaponType::iter() {
+                if weapons.iter().any(|owned| owned.weapon_type == weapon) {
+                    continue;
+                }
+                choices.push(UpgradeChoice {
+                    upgrade_type: UpgradeType::AcquireWeapon(weapon),
+                    description: format!("New weapon: {}", weapon.summary()),
+                    rarity: Rarity::Common,
+                });
             }
-            Ordering::Less => {
-                // Randomly select the needed number of generics to fill the gap
-                let needed_generics = Self::select_random_owned(
-                    Self::generate_generic_choices(),
-                    count - choices.len(),
-                    &mut rng,
-                );
-                choices.extend(needed_generics);
-            }
-            Ordering::Equal => (), // No adjustments needed
         }
-
-        choices
+        for definition in &catalog.items {
+            if passives.can_upgrade(definition.kind, catalog) {
+                let level = passives.level(definition.kind) + 1;
+                choices.push(UpgradeChoice {
+                    upgrade_type: UpgradeType::Passive(definition.kind, level),
+                    description: format!(
+                        "{} - {}",
+                        definition.name,
+                        definition.level_description(level)
+                    ),
+                    rarity: Rarity::Common,
+                });
+            }
+        }
+        // Useful permanent upgrades take precedence; healing remains available
+        // when the inventory cannot fill the normal offer count.
+        if choices.len() < count {
+            choices.extend(Self::generate_generic_choices());
+        }
+        Self::select_random_owned(choices, count, rng)
     }
 
-    fn calculate_count(luck: &Luck, rng: &mut impl RngExt) -> usize {
+    fn calculate_count(luck: &Luck, rng: &mut impl Rng) -> usize {
         const LUCK_FACTOR: f32 = 0.02;
         if rng.random::<f32>() < (luck.0 as f32) * LUCK_FACTOR {
             4
@@ -145,7 +162,7 @@ impl UpgradePool {
         }
     }
 
-    fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl RngExt) -> Vec<T>
+    fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl Rng) -> Vec<T>
     where
         I: IntoIterator<Item = T>,
     {
@@ -186,14 +203,14 @@ pub fn spawn_upgrade_choice(
             },
         ))
         .with_children(|parent| {
-            // Icon placeholder
             parent.spawn((
-                Text::new(icon),
-                TextFont {
-                    font_size: FontSize::Px(32.0),
+                ImageNode::default(),
+                crate::art::ItemIcon(icon),
+                Node {
+                    width: Val::Px(52.0),
+                    height: Val::Px(52.0),
                     ..default()
                 },
-                TextColor(menu::get_rarity_color(&choice.rarity)),
             ));
 
             // Text container
@@ -227,12 +244,13 @@ pub fn spawn_upgrade_choice(
         });
 }
 
-fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, String) {
+fn get_upgrade_display_info(choice: &UpgradeChoice) -> (usize, String, String) {
     match &choice.upgrade_type {
-        UpgradeType::Weapon(weapon_type, ..) => {
+        UpgradeType::Weapon(weapon_type, ..) | UpgradeType::AcquireWeapon(weapon_type) => {
             let icon = match weapon_type {
-                WeaponType::MagickCircle => "O",
-                // We can add more weapon types here as we implement them
+                WeaponType::MagickCircle => 0,
+                WeaponType::InscribedNeedles => 1,
+                WeaponType::AlchemicalVessel => 2,
             };
             (
                 icon,
@@ -240,9 +258,27 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
                 choice.description.clone(),
             )
         }
+        UpgradeType::Passive(kind, _) => {
+            let icon = match kind {
+                PassiveType::MoveSpeed => 3,
+                PassiveType::PickupRange => 4,
+                PassiveType::MaxHealth => 5,
+                PassiveType::Cooldown => 6,
+            };
+            // The offer embeds the authored item name, so this stays independent
+            // of resource access while the menu creates its hierarchy.
+            let name = choice
+                .description
+                .split(" - ")
+                .next()
+                .unwrap_or("Passive item")
+                .to_owned();
+            (icon, name, choice.description.clone())
+        }
         UpgradeType::Generic(generic_type) => {
             let icon = match generic_type {
-                GenericUpgrade::HealthPickup(_) => "+",
+                GenericUpgrade::HealthPickup(_) => 7,
+                GenericUpgrade::GoldPickup(_) => 9,
             };
             (
                 icon,

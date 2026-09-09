@@ -1,0 +1,9 @@
+// Cumulative bonuses, by item level. Fractions except max_health (flat HP).
+(
+    items: [
+        (kind: move_speed, name: "Pilgrim's Boots", description: "Walk faster between circles and away from pursuers.", levels: [0.1, 0.2, 0.3, 0.4, 0.5]),
+        (kind: pickup_range, name: "Lodestone", description: "Draw experience gems from farther away.", levels: [0.2, 0.4, 0.6, 0.8, 1.0]),
+        (kind: max_health, name: "Vital Relic", description: "Increase maximum health and restore the added capacity.", levels: [20.0, 40.0, 60.0, 80.0, 100.0]),
+        (kind: cooldown, name: "Hourglass", description: "All weapons attack more frequently.", levels: [0.04, 0.08, 0.12, 0.16, 0.2]),
+    ],
+)
