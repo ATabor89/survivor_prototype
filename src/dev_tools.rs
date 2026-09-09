@@ -1,7 +1,8 @@
 //! Optional playtest tools. The action layer is independent of egui for headless tests.
-use bevy::ecs::system::RunSystemOnce;
+use bevy::ecs::system::{RunSystemOnce, SystemParam};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use bevy_rapier2d::prelude::ReadRapierContext;
 use strum::IntoEnumIterator;
 
 use crate::components::{Enemy, Health, Player};
@@ -95,6 +96,8 @@ pub enum DebugAction {
     AdvancePhase,
     TriggerEncounter(usize),
     TestVictory,
+    TriggerFinale,
+    SpawnEnemy(String),
     SelectStage(usize),
     SpawnPickup(LootKind),
     SpawnBreakable,
@@ -120,6 +123,13 @@ impl Plugin for DebugActionsPlugin {
 }
 
 pub struct DebugUiPlugin;
+
+#[derive(SystemParam)]
+struct DebugPreferences<'w> {
+    config: Res<'w, crate::setup::ActiveRunConfig>,
+    audio: ResMut<'w, crate::game_audio::AudioSettings>,
+}
+
 impl Plugin for DebugUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(EguiPrimaryContextPass, panel).add_systems(
@@ -268,7 +278,14 @@ pub fn apply_actions(world: &mut World) {
             DebugAction::ClearArena => {
                 clear_effects(world);
                 let entities: Vec<_> = world
-                    .query_filtered::<Entity, Or<(With<Enemy>, With<ExperienceOrb>)>>()
+                    .query_filtered::<Entity, (
+                        Or<(
+                            With<Enemy>,
+                            With<ExperienceOrb>,
+                            With<crate::enemy_behavior::HostileProjectile>,
+                        )>,
+                        Without<crate::waves::FinalBoss>,
+                    )>()
                     .iter(world)
                     .collect();
                 for entity in entities {
@@ -276,7 +293,7 @@ pub fn apply_actions(world: &mut World) {
                 }
                 world.resource_mut::<SpawnTimer>().0.reset();
                 world.resource_mut::<DebugSession>().status =
-                    "Arena cleared; build and progression retained.".into();
+                    "Arena cleared; build, progression, and required final boss retained.".into();
             }
             DebugAction::SpawnTargets { moving } => {
                 let Ok(player) = world
@@ -401,10 +418,29 @@ pub fn apply_actions(world: &mut World) {
                 world
                     .resource_mut::<crate::resources::GameStats>()
                     .time_elapsed = duration;
+                // Explicit debug bypass. Normal boss-map victory still requires a kill.
+                world.resource_mut::<crate::waves::WaveDirector>().finale =
+                    crate::waves::FinaleProgress::Defeated;
                 world
                     .resource_mut::<NextState<GameState>>()
                     .set(GameState::Playing);
             }
+            DebugAction::TriggerFinale => {
+                let stage = world
+                    .resource::<GameContent>()
+                    .stage(world.resource::<ActiveStage>());
+                if matches!(
+                    stage.win_condition,
+                    crate::content::StageWinCondition::DefeatBoss { .. }
+                ) {
+                    let duration = stage.duration;
+                    let mut stats = world.resource_mut::<GameStats>();
+                    stats.time_elapsed = stats.time_elapsed.max(duration);
+                    world.resource_mut::<DebugSession>().status =
+                        "Final boss warning begins when the simulation runs.".into();
+                }
+            }
+            DebugAction::SpawnEnemy(id) => spawn_enemy_test(world, &id),
             DebugAction::SelectStage(index) => {
                 if let Some(stage) = world
                     .resource::<GameContent>()
@@ -557,6 +593,46 @@ fn flush_encounter_requests(world: &mut World) {
     }
 }
 
+fn spawn_enemy_test(world: &mut World, id: &str) {
+    let Some(definition) = world.resource::<GameContent>().enemy(id).cloned() else {
+        return;
+    };
+    let result = world.run_system_once(
+        move |mut commands: Commands,
+              textures: Res<GameTextures>,
+              player: Query<&Transform, With<Player>>,
+              bounds: Res<crate::arena::ArenaBounds>,
+              context: ReadRapierContext| {
+            let Ok(player) = player.single() else {
+                return false;
+            };
+            let Ok(context) = context.single() else {
+                return false;
+            };
+            let center = player.translation.truncate();
+            for index in 0..24 {
+                let position =
+                    center + Vec2::from_angle(index as f32 * std::f32::consts::TAU / 24.0) * 280.0;
+                if position
+                    .abs()
+                    .cmplt(bounds.half_size - Vec2::splat(32.0))
+                    .all()
+                    && crate::waves::position_is_free(&context, position, 20.0, None)
+                {
+                    crate::waves::spawn_enemy(&mut commands, &textures, &definition, position, 1.0);
+                    return true;
+                }
+            }
+            false
+        },
+    );
+    world.resource_mut::<DebugSession>().status = if matches!(result, Ok(true)) {
+        format!("Spawned {id} using its authored behavior.")
+    } else {
+        "No clear space for that test enemy.".into()
+    };
+}
+
 fn close_panel(world: &mut World) {
     let mut session = world.resource_mut::<DebugSession>();
     session.open = false;
@@ -590,7 +666,7 @@ fn panel(
     passives: Query<&PassiveInventory, With<Player>>,
     passive_catalog: Res<PassiveCatalog>,
     upgrade_config: Res<WeaponUpgradeConfig>,
-    active_config: Res<crate::setup::ActiveRunConfig>,
+    mut preferences: DebugPreferences,
 ) -> Result {
     session.wants_keyboard_input = false;
     session.wants_pointer_input = false;
@@ -649,7 +725,11 @@ fn panel(
                 }
             });
             ui.small("F1 / Escape closes. F2 opens Weapons. Live mode keeps this menu open.");
-            ui.small(format!("Run seed: {}", active_config.0.seed));
+            ui.small(format!("Run seed: {}", preferences.config.0.seed));
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut preferences.audio.muted, "Mute sound");
+                ui.add(egui::Slider::new(&mut preferences.audio.volume, 0.0..=1.0).text("Volume"));
+            });
             if !matches!(state.get(), GameState::Playing | GameState::DebugTools) {
                 ui.small("The game screen keeps its own pause. Debug controls remain available where applicable.");
             }
@@ -740,6 +820,17 @@ fn draw_run_controls(
         }
     });
     ui.small("Grant level keeps this menu open. Selection and treasure screens keep their pending choices.");
+    if matches!(stage.win_condition, crate::content::StageWinCondition::DefeatBoss { .. })
+        && ui.button("Start final boss encounter").clicked() {
+        session.actions.push(DebugAction::TriggerFinale);
+    }
+    ui.collapsing("Test an enemy", |ui| {
+        for enemy in &content.enemies {
+            if ui.button(format!("Spawn {}", enemy.name)).clicked() {
+                session.actions.push(DebugAction::SpawnEnemy(enemy.id.clone()));
+            }
+        }
+    });
     if !stage.encounters.is_empty() {
         ui.separator();
         ui.label("Authored encounters");

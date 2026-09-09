@@ -5,6 +5,33 @@ use crate::tests::{count, game, key, player, state, step};
 use bevy::prelude::*;
 
 #[test]
+fn debug_finale_waits_for_resume_and_clear_arena_preserves_required_boss() {
+    let mut app = game();
+    key(&mut app, KeyCode::F1);
+    step(&mut app, 2);
+    app.world_mut().resource_mut::<DebugSession>().waves = false;
+    app.world_mut()
+        .resource_mut::<DebugSession>()
+        .actions
+        .push(DebugAction::TriggerFinale);
+    step(&mut app, 10);
+    assert_eq!(state(&app), GameState::DebugTools);
+    assert_eq!(count::<crate::waves::FinalBoss>(&mut app), 0);
+    key(&mut app, KeyCode::F1);
+    step(&mut app, 130);
+    assert_eq!(count::<crate::waves::FinalBoss>(&mut app), 1);
+    key(&mut app, KeyCode::F1);
+    step(&mut app, 2);
+    app.world_mut()
+        .resource_mut::<DebugSession>()
+        .actions
+        .push(DebugAction::ClearArena);
+    step(&mut app, 2);
+    assert_eq!(count::<crate::waves::FinalBoss>(&mut app), 1);
+    assert_ne!(state(&app), GameState::Victory);
+}
+
+#[test]
 fn debug_keyboard_focus_cannot_claim_treasure_behind_the_panel() {
     let mut app = crate::tests::game();
     {

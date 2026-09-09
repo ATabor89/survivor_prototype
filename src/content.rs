@@ -26,6 +26,132 @@ pub struct EnemyDefinition {
     pub size: f32,
     pub color: [f32; 4],
     pub xp: u32,
+    #[serde(default)]
+    pub behavior: EnemyBehavior,
+}
+
+/// Authored attack timing; ordinary pursuit remains the backwards-compatible default.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum EnemyBehavior {
+    #[default]
+    Pursuer,
+    Charger {
+        trigger_range: f32,
+        windup: f32,
+        dash_speed: f32,
+        dash_seconds: f32,
+        recovery: f32,
+    },
+    Ranged {
+        preferred_range: f32,
+        windup: f32,
+        cooldown: f32,
+        projectile_speed: f32,
+        projectile_lifetime: f32,
+        damage: i32,
+        #[serde(default = "one_projectile")]
+        projectile_count: u8,
+        #[serde(default)]
+        spread_radians: f32,
+    },
+    Warden {
+        charge: ChargeConfig,
+        ranged: RangedConfig,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChargeConfig {
+    pub trigger_range: f32,
+    pub windup: f32,
+    pub dash_speed: f32,
+    pub dash_seconds: f32,
+    pub recovery: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RangedConfig {
+    pub preferred_range: f32,
+    pub windup: f32,
+    pub cooldown: f32,
+    pub projectile_speed: f32,
+    pub projectile_lifetime: f32,
+    pub damage: i32,
+    #[serde(default = "one_projectile")]
+    pub projectile_count: u8,
+    #[serde(default)]
+    pub spread_radians: f32,
+}
+
+fn one_projectile() -> u8 {
+    1
+}
+
+impl EnemyBehavior {
+    pub fn charge(self) -> Option<ChargeConfig> {
+        match self {
+            Self::Charger {
+                trigger_range,
+                windup,
+                dash_speed,
+                dash_seconds,
+                recovery,
+            } => Some(ChargeConfig {
+                trigger_range,
+                windup,
+                dash_speed,
+                dash_seconds,
+                recovery,
+            }),
+            Self::Warden { charge, .. } => Some(charge),
+            _ => None,
+        }
+    }
+
+    pub fn ranged(self) -> Option<RangedConfig> {
+        match self {
+            Self::Ranged {
+                preferred_range,
+                windup,
+                cooldown,
+                projectile_speed,
+                projectile_lifetime,
+                damage,
+                projectile_count,
+                spread_radians,
+            } => Some(RangedConfig {
+                preferred_range,
+                windup,
+                cooldown,
+                projectile_speed,
+                projectile_lifetime,
+                damage,
+                projectile_count,
+                spread_radians,
+            }),
+            Self::Warden { ranged, .. } => Some(ranged),
+            _ => None,
+        }
+    }
+
+    fn validate(self, label: &str) -> Result<(), String> {
+        if let Some(config) = self.charge() {
+            ensure([config.trigger_range, config.windup, config.dash_speed, config.dash_seconds, config.recovery].into_iter().all(positive)
+                && config.dash_speed <= 2000.0,
+                &format!("{label}: charge ranges/times/speed must be positive and finite; dash speed must not exceed 2000"))?;
+        }
+        if let Some(config) = self.ranged() {
+            ensure([config.preferred_range, config.windup, config.cooldown, config.projectile_speed, config.projectile_lifetime].into_iter().all(positive)
+                && config.projectile_speed <= 2000.0 && config.damage > 0
+                && (1..=12).contains(&config.projectile_count)
+                && config.spread_radians.is_finite() && (0.0..=std::f32::consts::PI).contains(&config.spread_radians),
+                &format!("{label}: ranged ranges/times/speed/damage must be positive and finite, speed <= 2000, projectile count 1..=12, spread 0..=PI"))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -35,12 +161,24 @@ pub enum StageLayout {
     Vertical,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum StageWinCondition {
+    #[default]
+    TimedSurvival,
+    DefeatBoss {
+        enemy: String,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageDefinition {
     pub id: String,
     pub name: String,
     pub duration: f32,
+    #[serde(default)]
+    pub win_condition: StageWinCondition,
     pub half_size: [f32; 2],
     pub layout: StageLayout,
     pub schedule: Vec<WavePhase>,
@@ -220,6 +358,7 @@ impl GameContent {
                 &format!("{label}: name is empty"),
             )?;
             ensure(enemy.health > 0 && positive(enemy.size) && enemy.speed.is_finite() && enemy.speed >= 0.0, &format!("{label}: health and size must be positive; speed must be finite and nonnegative"))?;
+            enemy.behavior.validate(&label)?;
             ensure(
                 enemy
                     .color
@@ -239,6 +378,12 @@ impl GameContent {
                 !stage.name.trim().is_empty() && positive(stage.duration),
                 &format!("{label}: name and positive duration are required"),
             )?;
+            if let StageWinCondition::DefeatBoss { enemy } = &stage.win_condition {
+                ensure(
+                    enemy_ids.contains(enemy.as_str()),
+                    &format!("{label}: victory requires unknown boss '{enemy}'"),
+                )?;
+            }
             ensure(
                 stage
                     .half_size

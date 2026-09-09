@@ -1,13 +1,17 @@
 mod arena;
 mod art;
+mod audio_controls;
 mod combat;
 mod components;
 mod content;
 mod death;
 #[cfg(feature = "dev-tools")]
 mod dev_tools;
+mod enemy_behavior;
 mod events;
 mod experience;
+mod feedback;
+mod game_audio;
 mod inventory;
 mod loot;
 mod menu;
@@ -27,6 +31,8 @@ mod weapons;
 mod debug_regression_tests;
 #[cfg(test)]
 mod encounter_regression_tests;
+#[cfg(test)]
+mod enemy_behavior_regression_tests;
 #[cfg(test)]
 mod inventory_regression_tests;
 #[cfg(test)]
@@ -96,8 +102,10 @@ impl Plugin for SurvivorsGamePlugin {
             .init_resource::<WaveConfig>()
             .init_resource::<UpgradePool>()
             .init_resource::<telemetry::RunTelemetry>()
+            .init_resource::<game_audio::AudioSettings>()
             // Events
             .add_message::<DamageEvent>()
+            .add_message::<combat::DamageApplied>()
             .add_message::<EntityDeathEvent>()
             .add_message::<GenericUpgradeConfirmedEvent>()
             // States
@@ -109,6 +117,9 @@ impl Plugin for SurvivorsGamePlugin {
             .add_plugins(WeaponPlugin)
             .add_plugins((arena::ArenaPlugin, run::RunPlugin, waves::WavesPlugin))
             .add_plugins(loot::LootPlugin)
+            .add_plugins(feedback::FeedbackPlugin)
+            .add_plugins(audio_controls::AudioControlsPlugin)
+            .add_plugins(enemy_behavior::EnemyBehaviorPlugin)
             .add_plugins((
                 inventory::InventoryPlugin,
                 setup::SetupPlugin,
@@ -228,7 +239,8 @@ fn main() {
             }),
     )
     .add_plugins(ShapePlugin)
-    .add_plugins(SurvivorsGamePlugin);
+    .add_plugins(SurvivorsGamePlugin)
+    .add_plugins(game_audio::GameAudioPlugin);
     // Headless gameplay harnesses start in Playing; the executable opens setup.
     app.insert_state(GameState::MainMenu);
     #[cfg(feature = "dev-tools")]

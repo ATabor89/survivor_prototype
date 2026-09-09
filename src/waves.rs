@@ -2,7 +2,10 @@
 use crate::{
     arena::{camera_half_view, ArenaBounds, GameCamera, WORLD_GROUP},
     components::{Enemy, Health, Player},
-    content::{ActiveStage, EnemyDefinition, GameContent, StageLayout, TimedEncounter, WavePhase},
+    content::{
+        ActiveStage, EnemyDefinition, GameContent, StageLayout, StageWinCondition, TimedEncounter,
+        WavePhase,
+    },
     death::MarkedForDeath,
     resources::{GameState, GameStats, GameTextures, SpawnTimer, WaveConfig},
     run::RunEntity,
@@ -23,6 +26,16 @@ pub struct WaveDirector {
     pub spawned: usize,
     pub phase: Option<usize>,
     pub fired_encounters: HashSet<usize>,
+    pub finale: FinaleProgress,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FinaleProgress {
+    #[default]
+    Awaiting,
+    Telegraphing,
+    Active(Entity),
+    Defeated,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -30,17 +43,29 @@ pub struct EnemyKind(pub String);
 #[derive(Component)]
 pub struct Boss;
 #[derive(Component)]
+pub struct FinalBoss;
+#[derive(Component)]
+pub(crate) struct BossHealthFill {
+    pub full_width: f32,
+}
+#[derive(Component)]
 struct NaturalSpawn;
 
 /// A debug request uses the same telegraph and encounter execution as the timeline.
 #[derive(Message)]
 pub struct TriggerEncounter(pub usize);
 
+/// Starts the authored finale through its normal warning and spawn path.
+#[derive(Message)]
+pub struct TriggerFinale;
+
 #[derive(Component)]
 pub struct EncounterTelegraph {
     encounter: TimedEncounter,
     center: Vec2,
     timer: Timer,
+    finale: bool,
+    placement_ready: bool,
 }
 
 #[derive(Component)]
@@ -84,10 +109,13 @@ impl Plugin for WavesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaveDirector>()
             .add_message::<TriggerEncounter>()
+            .add_message::<TriggerFinale>()
+            .add_systems(Update, update_boss_health_bars.after(GameplaySets::Combat))
             .add_systems(
                 Update,
                 (
                     spawn_wave,
+                    schedule_finale,
                     schedule_encounters,
                     finish_telegraphs,
                     recycle_distant_enemies,
@@ -192,6 +220,7 @@ pub fn spawn_enemy(
         .spawn((
             RunEntity,
             EnemyKind(definition.id.clone()),
+            crate::enemy_behavior::EnemyBrain::new(definition.behavior),
             Name::new(definition.name.clone()),
             Enemy {
                 speed: definition.speed,
@@ -354,10 +383,13 @@ fn schedule_encounters(
         commands.spawn((
             RunEntity,
             Name::new("Encounter warning"),
+            Visibility::Inherited,
             EncounterTelegraph {
                 encounter,
                 center,
                 timer: Timer::from_seconds(2.0, TimerMode::Once),
+                finale: false,
+                placement_ready: true,
             },
             ShapeBuilder::with(&shapes::Circle {
                 radius,
@@ -372,7 +404,110 @@ fn schedule_encounters(
 
 #[expect(
     clippy::too_many_arguments,
+    reason = "Finale scheduling validates run progress, player lifetime, and pending scene entities."
+)]
+fn schedule_finale(
+    mut commands: Commands,
+    mut stats: ResMut<GameStats>,
+    content: Res<GameContent>,
+    active: Res<ActiveStage>,
+    mut director: ResMut<WaveDirector>,
+    mut requests: MessageReader<TriggerFinale>,
+    player: Query<(&Transform, &Health), With<Player>>,
+    bosses: Query<(), With<FinalBoss>>,
+    pending: Query<&EncounterTelegraph>,
+    context: ReadRapierContext,
+) {
+    let requested = requests.read().count() > 0;
+    let stage = content.stage(&active);
+    let StageWinCondition::DefeatBoss { enemy } = &stage.win_condition else {
+        return;
+    };
+    let Ok((player, health)) = player.single() else {
+        return;
+    };
+    if health.current <= 0 {
+        return;
+    }
+    if requested {
+        stats.time_elapsed = stats.time_elapsed.max(stage.duration);
+    }
+    if stats.time_elapsed < stage.duration {
+        return;
+    }
+    // External cleanup is not a kill. Recreate missing required actors rather
+    // than granting victory or leaving an unwinnable run.
+    match director.finale {
+        FinaleProgress::Active(entity) if bosses.contains(entity) => return,
+        FinaleProgress::Telegraphing if pending.iter().any(|event| event.finale) => return,
+        FinaleProgress::Defeated => return,
+        _ => {}
+    }
+    director.finale = FinaleProgress::Telegraphing;
+    let Ok(context) = context.single() else {
+        return;
+    };
+    let position = finale_position(
+        &context,
+        player.translation.truncate(),
+        Vec2::from_array(stage.half_size),
+    );
+    let center = position.unwrap_or(player.translation.truncate());
+    commands.spawn((
+        RunEntity,
+        Name::new("Final boss warning"),
+        EncounterTelegraph {
+            encounter: TimedEncounter {
+                at: stage.duration,
+                enemy: enemy.clone(),
+                count: 1,
+                ring: None,
+                reward_chest: false,
+            },
+            center,
+            timer: Timer::from_seconds(2.0, TimerMode::Once),
+            finale: true,
+            placement_ready: position.is_some(),
+        },
+        if position.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
+        ShapeBuilder::with(&shapes::Circle {
+            radius: 70.0,
+            center: Vec2::ZERO,
+        })
+        .stroke((Color::srgba(1.0, 0.3, 0.15, 0.95), 5.0))
+        .build(),
+        Transform::from_translation(center.extend(2.0)),
+    ));
+}
+
+fn finale_position(context: &RapierContext, origin: Vec2, bounds: Vec2) -> Option<Vec2> {
+    for radius in [
+        450.0, 350.0, 550.0, 250.0, 650.0, 150.0, 750.0, 850.0, 950.0, 100.0,
+    ] {
+        for index in 0..32 {
+            let candidate =
+                origin + Vec2::from_angle(index as f32 / 32.0 * std::f32::consts::TAU) * radius;
+            if candidate.abs().cmple(bounds - Vec2::splat(24.0)).all()
+                && position_is_free(context, candidate, 20.0, None)
+            {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[expect(
+    clippy::too_many_arguments,
     reason = "Encounter execution needs scene geometry and shared authored enemy definitions."
+)]
+#[expect(
+    clippy::type_complexity,
+    reason = "The player and telegraph transform queries explicitly exclude each other."
 )]
 fn finish_telegraphs(
     mut commands: Commands,
@@ -382,20 +517,51 @@ fn finish_telegraphs(
     textures: Res<GameTextures>,
     bounds: Res<ArenaBounds>,
     context: ReadRapierContext,
-    mut pending: Query<(Entity, &mut EncounterTelegraph)>,
+    mut pending: Query<(
+        Entity,
+        &mut EncounterTelegraph,
+        &mut Transform,
+        &mut Visibility,
+    )>,
     active: Res<ActiveStage>,
-    player: Query<&Health, With<Player>>,
+    player: Query<(&Transform, &Health), (With<Player>, Without<EncounterTelegraph>)>,
+    mut director: ResMut<WaveDirector>,
 ) {
-    if stats.time_elapsed >= content.stage(&active).duration
-        || !player.single().is_ok_and(|health| health.current > 0)
-    {
+    let Ok((player_transform, health)) = player.single() else {
+        return;
+    };
+    if health.current <= 0 {
         return;
     }
     let Ok(context) = context.single() else {
         return;
     };
-    for (entity, mut pending) in &mut pending {
+    for (entity, mut pending, mut transform, mut visibility) in &mut pending {
+        if !pending.finale && stats.time_elapsed >= content.stage(&active).duration {
+            commands.entity(entity).despawn();
+            continue;
+        }
         if !pending.timer.tick(time.delta()).just_finished() {
+            continue;
+        }
+        if pending.finale
+            && (!pending.placement_ready || !position_is_free(&context, pending.center, 20.0, None))
+        {
+            if let Some(position) = finale_position(
+                &context,
+                player_transform.translation.truncate(),
+                bounds.half_size,
+            ) {
+                pending.center = position;
+                pending.placement_ready = true;
+                pending.timer = Timer::from_seconds(2.0, TimerMode::Once);
+                transform.translation = position.extend(2.0);
+                *visibility = Visibility::Inherited;
+            } else {
+                pending.placement_ready = false;
+                pending.timer = Timer::from_seconds(0.25, TimerMode::Once);
+                *visibility = Visibility::Hidden;
+            }
             continue;
         }
         let event = &pending.encounter;
@@ -405,10 +571,12 @@ fn finish_telegraphs(
         let mut leader = None;
         for index in 0..event.count {
             let mut position = None;
-            for attempt in 0..24 {
-                let angle = (index as f32 / event.count as f32 + attempt as f32 / 24.0)
+            let attempts = if pending.finale { 1 } else { 24 };
+            for attempt in 0..attempts {
+                let angle = (index as f32 / event.count as f32 + (attempt % 24) as f32 / 24.0)
                     * std::f32::consts::TAU;
-                let candidate = pending.center + Vec2::from_angle(angle) * 150.0;
+                let radius = if pending.finale { 0.0 } else { 150.0 };
+                let candidate = pending.center + Vec2::from_angle(angle) * radius;
                 if candidate
                     .abs()
                     .cmple(bounds.half_size - Vec2::splat(24.0))
@@ -423,19 +591,39 @@ fn finish_telegraphs(
                 continue;
             };
             let boss = spawn_enemy(&mut commands, &textures, definition, position, 1.0);
+            if pending.finale {
+                commands.entity(boss).insert(FinalBoss);
+                director.finale = FinaleProgress::Active(boss);
+            }
             commands
                 .entity(boss)
                 .insert(Boss)
                 .with_children(|children| {
+                    let width = definition.size.max(48.0);
+                    let height = definition.size * 0.5 + 10.0;
                     children.spawn((
-                        Sprite::from_color(Color::srgb(1.0, 0.77, 0.25), Vec2::new(28.0, 7.0)),
-                        Transform::from_xyz(0.0, definition.size * 0.45, 1.0),
+                        Sprite::from_color(
+                            Color::srgb(0.12, 0.08, 0.07),
+                            Vec2::new(width + 4.0, 10.0),
+                        ),
+                        Transform::from_xyz(0.0, height, 1.0),
+                    ));
+                    children.spawn((
+                        BossHealthFill { full_width: width },
+                        Sprite::from_color(Color::srgb(1.0, 0.77, 0.25), Vec2::new(width, 6.0)),
+                        Transform::from_xyz(0.0, height, 2.0),
                     ));
                 });
             if event.reward_chest {
                 commands.entity(boss).insert(crate::loot::ChestDrop);
             }
             leader = Some(boss);
+        }
+        if pending.finale && leader.is_none() {
+            // Retry through Rapier after enemies move or obstructing props clear.
+            // A failed spawn never consumes the required encounter.
+            pending.timer = Timer::from_seconds(0.25, TimerMode::Once);
+            continue;
         }
         if let Some(ring) = &event.ring {
             let definition = content.enemy(&ring.enemy).expect("validated ring enemy");
@@ -460,6 +648,26 @@ fn finish_telegraphs(
             }
         }
         commands.entity(entity).despawn();
+    }
+}
+
+// Presentation stays responsive to debug edits while the simulation is paused.
+fn update_boss_health_bars(
+    bosses: Query<&Health, With<Boss>>,
+    mut fills: Query<(&BossHealthFill, &ChildOf, &mut Sprite, &mut Transform)>,
+) {
+    for (fill, parent, mut sprite, mut transform) in &mut fills {
+        let Ok(health) = bosses.get(parent.parent()) else {
+            continue;
+        };
+        let fraction = if health.maximum > 0 {
+            (health.current as f32 / health.maximum as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let width = fill.full_width * fraction;
+        sprite.custom_size = Some(Vec2::new(width, 6.0));
+        transform.translation.x = (width - fill.full_width) * 0.5;
     }
 }
 

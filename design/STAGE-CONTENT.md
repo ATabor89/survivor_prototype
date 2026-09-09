@@ -1,5 +1,7 @@
 # Authored stages, encounters, and rewards
 
+The current combat and objective pass is documented in [Combat encounters](COMBAT-ENCOUNTERS.md): enemy attack behaviors, per-map timed/boss victory, health bars, feedback, and audio. The research below records the earlier prototype investigation; example phase values are illustrative rather than the current Courtyard balance.
+
 ## Research findings
 
 The reference is the community-maintained Vampire Survivors Wiki, inspected September 9, 2026. These are documented mechanics, not a claim that we inspected the current game's source. The tables and descriptions can lag game updates.

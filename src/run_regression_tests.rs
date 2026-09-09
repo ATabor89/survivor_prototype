@@ -204,6 +204,10 @@ fn rapier_walls_block_player_and_allow_sliding_in_every_direction() {
 #[test]
 fn ten_minute_victory_pause_and_restart_reset_run_but_preserve_arena() {
     let mut app = game();
+    app.world_mut()
+        .resource_mut::<crate::content::GameContent>()
+        .stages[0]
+        .win_condition = crate::content::StageWinCondition::TimedSurvival;
     let original_player = player(&mut app);
     app.world_mut().resource_mut::<GameStats>().time_elapsed = 599.8;
     key(&mut app, KeyCode::Escape);

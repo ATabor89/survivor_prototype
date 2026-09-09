@@ -12,22 +12,23 @@ pub struct RunEntity;
 pub struct RunPlugin;
 impl Plugin for RunPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            advance_run
-                .in_set(GameplaySets::Progress)
-                .run_if(in_state(GameState::Playing)),
-        )
-        .add_systems(
-            OnEnter(GameState::Restarting),
-            (
-                reset_run,
-                crate::systems::spawn_player,
-                crate::setup::apply_starting_loadout,
-                resume_run,
+        app.add_systems(Update, record_final_boss_death.after(GameplaySets::Cleanup))
+            .add_systems(
+                Update,
+                advance_run
+                    .in_set(GameplaySets::Progress)
+                    .run_if(in_state(GameState::Playing)),
             )
-                .chain(),
-        );
+            .add_systems(
+                OnEnter(GameState::Restarting),
+                (
+                    reset_run,
+                    crate::systems::spawn_player,
+                    crate::setup::apply_starting_loadout,
+                    resume_run,
+                )
+                    .chain(),
+            );
         app.add_systems(OnEnter(GameState::MainMenu), reset_run);
     }
 }
@@ -39,13 +40,35 @@ fn advance_run(
     mut next: ResMut<NextState<GameState>>,
     content: Res<crate::content::GameContent>,
     active: Res<crate::content::ActiveStage>,
+    director: Res<crate::waves::WaveDirector>,
 ) {
+    use crate::{content::StageWinCondition, waves::FinaleProgress};
     // Combat has already run. A lethal frame always wins over victory or XP.
     if player.single().is_ok_and(|health| health.current > 0) {
-        let duration = content.stage(&active).duration;
-        stats.time_elapsed = (stats.time_elapsed + time.delta_secs()).min(duration);
-        if stats.time_elapsed >= duration {
+        let stage = content.stage(&active);
+        stats.time_elapsed += time.delta_secs();
+        let won = match stage.win_condition {
+            StageWinCondition::TimedSurvival => {
+                stats.time_elapsed = stats.time_elapsed.min(stage.duration);
+                stats.time_elapsed >= stage.duration
+            }
+            StageWinCondition::DefeatBoss { .. } => director.finale == FinaleProgress::Defeated,
+        };
+        if won {
             next.set(GameState::Victory);
+        }
+    }
+}
+
+// Read death messages even if a kill opens a level-up/treasure screen. Messages
+// expire after two updates, whereas the run may remain paused indefinitely.
+fn record_final_boss_death(
+    mut director: ResMut<crate::waves::WaveDirector>,
+    mut deaths: MessageReader<crate::events::EntityDeathEvent>,
+) {
+    for death in deaths.read() {
+        if director.finale == crate::waves::FinaleProgress::Active(death.entity) {
+            director.finale = crate::waves::FinaleProgress::Defeated;
         }
     }
 }
@@ -88,6 +111,9 @@ fn reset_run(world: &mut World) {
     world
         .resource_mut::<Messages<crate::waves::TriggerEncounter>>()
         .clear();
+    world
+        .resource_mut::<Messages<crate::waves::TriggerFinale>>()
+        .clear();
     crate::loot::reset_loot(world);
     world.remove_resource::<crate::menu::PendingAddCircleUpgrade>();
     world
@@ -100,6 +126,9 @@ fn reset_run(world: &mut World) {
         .clear();
     world
         .resource_mut::<Messages<crate::combat::DamageEvent>>()
+        .clear();
+    world
+        .resource_mut::<Messages<crate::combat::DamageApplied>>()
         .clear();
     world
         .resource_mut::<Messages<crate::events::EntityDeathEvent>>()

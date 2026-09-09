@@ -4,8 +4,9 @@ An occult-themed 2D survivors prototype built with Bevy 0.19, Rapier, and Lyon.
 Build an inventory of Magick Circles, Inscribed Needles, Alchemical Vessels, and
 passive items while collecting experience, breaking props for supplies, and
 surviving authored enemy phases and boss encounters.
-Three bounded stages offer arena, horizontal, and vertical layouts. Death and
-victory both lead to a run summary and a fresh-run option.
+Three bounded stages offer arena, horizontal, and vertical layouts. The Courtyard
+culminates in a final boss at ten minutes; defeating it wins the run. The other
+maps demonstrate timed survival. Death and victory both lead to a run summary.
 
 ## Build and run
 
@@ -21,8 +22,9 @@ For a direct `.exe` launch, set `BEVY_ASSET_ROOT` to the repository root or plac
 `assets/` beside the executable. `cargo run` supplies the project root automatically.
 
 The first build takes longer because development dependencies are optimized.
-Bevy's 2D and UI feature groups are enabled; audio and 3D can be enabled when
-those systems are introduced.
+Bevy's 2D, UI, and audio features are enabled. Short CC0 placeholder sounds come
+from Kenney; [sound credits and licenses](assets/audio/README.md) are included.
+Setup, pause, result screens, and debug tools offer mute/volume controls.
 
 The game launches in a resizable **1920 × 1080** window. The camera follows the
 player rather than zooming out to fit the whole stage.
@@ -64,13 +66,15 @@ panel stays open. Its visibility, tab, and pause preference survive run changes.
 
 | Tab | Controls |
 | --- | --- |
-| Run | Heal, grant a level, toggle natural spawns/invulnerability, skip a minute or the next authored phase, test victory, and trigger named encounters |
+| Run | Heal, grant a level, toggle natural spawns/invulnerability, skip a minute or phase, spawn authored enemies, trigger encounters/finale, or bypass to victory |
 | Weapons | Circle patterns and presets, weapon/passive grants, apply builds, spawn stationary/moving test targets |
 | World | Select a stage and restart, spawn test chests/healing/urns, show Rapier colliders, clear the arena |
 
 Encounter requests made while paused remain queued until the simulation resumes.
 **Next phase** uses the stage's authored timestamps; **Next wave** advances a minute
-and stops before the stage's ending. **Test victory** uses that stage's duration.
+and stops before the stage's ending. **Start final boss encounter** advances to
+the authored boss objective and waits for simulation resume. **Test victory**
+explicitly bypasses the objective.
 Choosing a stage starts a fresh run. **Clear arena** preserves the current build
 and progression. See [circle composition](design/CIRCLE-COMPOSITION.md) for effect rules.
 
@@ -93,7 +97,7 @@ worldbuilding contract, configuration behavior, art provenance, and verification
 
 | Stage | Layout | Playable size | Survival time |
 | --- | --- | --- | --- |
-| The Sealed Courtyard | Arena | 3,200 × 2,400 | 10 minutes |
+| The Sealed Courtyard | Arena | 3,200 × 2,400 | Final boss at 10 minutes |
 | The Ash Processional | Horizontal | 12,800 × 560 | 9 minutes |
 | The Bell Descent | Vertical | 960 × 11,200 | 8 minutes |
 
@@ -108,10 +112,11 @@ or currency progression yet.
 Edit [assets/data/stages.ron](assets/data/stages.ron) and relaunch to change stages,
 enemy definitions, encounter schedules, obstacles, pickups, and breakables without
 editing Rust. Content is validated at startup. See [stage content and playtesting](design/STAGE-CONTENT.md)
-for authoring details and the current verification record.
+for authoring details. The [combat encounter guide](design/COMBAT-ENCOUNTERS.md)
+documents map win conditions, enemy attacks, pacing, and combat feedback.
 
 Encounter schedules and XP progression are an initial balance pass. Mid-run
-saves, audio, and persistent progression remain future work. The
+saves and persistent progression remain future work. The
 [systems review](design/SYSTEMS-REVIEW.md) records the earlier refactor baseline;
 [the design document](design/DESIGN.md) preserves the larger concept.
 

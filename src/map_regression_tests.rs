@@ -25,8 +25,18 @@ fn authored_content_has_three_distinct_layouts_and_subminute_wave_changes() {
         .iter()
         .find(|phase| phase.start == 150.0)
         .unwrap();
-    assert!(later.interval < early.interval);
-    assert!(later.cap > early.cap);
+    // Introducing the caster deliberately reduces pursuit pressure at 2:30.
+    assert!(later.interval > early.interval);
+    assert!(later.cap < early.cap);
+    assert!(later.enemies.iter().any(|entry| entry.id == "caster"));
+    assert!(matches!(
+        stage.win_condition,
+        crate::content::StageWinCondition::DefeatBoss { .. }
+    ));
+    assert_eq!(
+        content.stages[1].win_condition,
+        crate::content::StageWinCondition::TimedSurvival
+    );
     assert!(stage
         .encounters
         .iter()

@@ -10,6 +10,16 @@ pub struct DamageEvent {
     pub source: Option<Entity>,
 }
 
+/// Presentation observes resolved damage, never guesses whether a hit applied.
+#[derive(Message)]
+pub struct DamageApplied {
+    pub target: Entity,
+    pub amount: u64,
+    pub is_player: bool,
+    pub position: Vec2,
+    pub lethal: bool,
+}
+
 #[derive(Component)]
 pub struct DamageCooldown {
     pub time: f32,
@@ -46,6 +56,8 @@ pub fn handle_damage(
     enemies: Query<(), With<crate::components::Enemy>>,
     mut telemetry: ResMut<crate::telemetry::RunTelemetry>,
     players: Query<(), With<crate::components::Player>>,
+    positions: Query<&Transform>,
+    mut applied: MessageWriter<DamageApplied>,
     #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
     #[cfg(feature = "dev-tools")] player_query: Query<(), With<crate::components::Player>>,
 ) {
@@ -92,6 +104,15 @@ pub fn handle_damage(
             telemetry.damage_taken = telemetry.damage_taken.saturating_add(removed);
         }
         health.current -= effective_damage;
+        applied.write(DamageApplied {
+            target: event.target,
+            amount: removed,
+            is_player: players.contains(event.target),
+            position: positions
+                .get(event.target)
+                .map_or(Vec2::ZERO, |t| t.translation.truncate()),
+            lethal: health.current <= 0,
+        });
         debug!(
             "Applied {} damage to {:?} from {:?}; health is {}",
             effective_damage, event.target, event.source, health.current

@@ -446,6 +446,8 @@ pub fn update_run_status(
     wave: Res<WaveConfig>,
     content: Res<crate::content::GameContent>,
     active: Res<crate::content::ActiveStage>,
+    stats: Res<GameStats>,
+    director: Res<crate::waves::WaveDirector>,
     xp: Query<&Experience, With<Player>>,
     mut labels: ParamSet<(
         Query<&mut Text, With<RunStatus>>,
@@ -454,12 +456,27 @@ pub fn update_run_status(
 ) {
     if let Ok(mut text) = labels.p0().single_mut() {
         let stage = content.stage(&active);
-        text.0 = format!(
-            "{} - Wave {} / {}",
-            stage.name,
-            wave.current_wave.max(1),
-            (stage.duration / 60.0).ceil() as u32
-        );
+        text.0 = if stats.time_elapsed >= stage.duration
+            && matches!(
+                stage.win_condition,
+                crate::content::StageWinCondition::DefeatBoss { .. }
+            ) {
+            match director.finale {
+                crate::waves::FinaleProgress::Awaiting
+                | crate::waves::FinaleProgress::Telegraphing => {
+                    "FINAL BOSS - Prepare for the encounter".into()
+                }
+                crate::waves::FinaleProgress::Active(_) => "FINAL BOSS - Defeat it to win".into(),
+                crate::waves::FinaleProgress::Defeated => "FINAL BOSS - Defeated".into(),
+            }
+        } else {
+            format!(
+                "{} - Wave {} / {}",
+                stage.name,
+                wave.current_wave.max(1),
+                (stage.duration / 60.0).ceil() as u32
+            )
+        };
     }
     if let Ok(xp) = xp.single() {
         if let Ok(mut text) = labels.p1().single_mut() {

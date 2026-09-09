@@ -195,20 +195,32 @@ pub fn spawn_player(mut commands: Commands, game_textures: Res<GameTextures>) {
     ));
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "Optional authored steering shares the existing enemy movement and crowd-control path."
+)]
 pub fn enemy_movement(
     player_query: Query<&Transform, With<Player>>,
     mut enemy_query: Query<
-        (Entity, &Transform, &Enemy, &mut Velocity),
+        (
+            Entity,
+            &Transform,
+            &Enemy,
+            &mut Velocity,
+            Option<&crate::enemy_behavior::EnemyBrain>,
+        ),
         Without<crate::waves::RingMember>,
     >,
     binding_query: Query<&BindingEffect>,
     pull_query: Query<&InvocationPull>,
 ) {
     if let Ok(player_transform) = player_query.single() {
-        for (entity, transform, enemy, mut velocity) in enemy_query.iter_mut() {
+        for (entity, transform, enemy, mut velocity, brain) in enemy_query.iter_mut() {
             let direction =
                 (player_transform.translation - transform.translation).normalize_or_zero();
-            let base_velocity = direction.truncate() * enemy.speed * 0.8;
+            let base_velocity = brain.map_or(direction.truncate() * enemy.speed * 0.8, |brain| {
+                brain.desired_velocity
+            });
 
             // Check if enemy is under binding effect
             let binding_strength = if let Ok(binding) = binding_query.get(entity) {
@@ -218,7 +230,7 @@ pub fn enemy_movement(
             };
 
             // Apply movement reduction based on binding strength
-            let mut final_velocity = base_velocity * (1.0 - binding_strength);
+            let mut final_velocity = base_velocity * (1.0 - binding_strength.clamp(0.0, 1.0));
 
             // Check if enemy is being pulled by an Invocation circle
             if let Ok(pull) = pull_query.get(entity) {

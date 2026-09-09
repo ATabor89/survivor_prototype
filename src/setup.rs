@@ -627,12 +627,26 @@ fn update_setup_summary(
     status: Res<SetupStatus>,
     mut text: Query<&mut Text, With<SetupSummary>>,
 ) {
-    let stage = content
-        .stages
-        .iter()
-        .find(|s| s.id == config.stage)
-        .map(|s| s.name.as_str())
-        .unwrap_or("Unknown stage");
+    let stage = content.stages.iter().find(|s| s.id == config.stage);
+    let stage_name = stage.map_or("Unknown stage", |s| s.name.as_str());
+    let objective = stage.map_or_else(
+        || "Unknown objective".into(),
+        |stage| {
+            let minutes = stage.duration as u32 / 60;
+            let seconds = stage.duration as u32 % 60;
+            match &stage.win_condition {
+                crate::content::StageWinCondition::TimedSurvival => {
+                    format!("Survive {minutes}:{seconds:02}")
+                }
+                crate::content::StageWinCondition::DefeatBoss { enemy } => format!(
+                    "At {minutes}:{seconds:02}, defeat {} to win",
+                    content
+                        .enemy(enemy)
+                        .map_or(enemy.as_str(), |enemy| enemy.name.as_str())
+                ),
+            }
+        },
+    );
     let weapons = config
         .weapons
         .iter()
@@ -654,7 +668,7 @@ fn update_setup_summary(
     };
     for mut text in &mut text {
         text.0 = format!(
-            "Stage: {stage}\nSeed: {seed}\nStarting build: {weapons} | {} passive items\n{}",
+            "Stage: {stage_name}\nObjective: {objective}\nSeed: {seed}\nStarting build: {weapons} | {} passive items\n{}",
             config.passives.len(),
             status.message
         );
