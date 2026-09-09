@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::platform::collections::{HashMap, HashSet};
+use bevy::prelude::*;
 
 use crate::weapons::magick_circle::PatternType;
 
@@ -141,7 +141,7 @@ pub fn overlap_detection_system(
     #[cfg(debug_assertions)]
     if !active_overlaps.overlaps.is_empty() {
         for (_pair, info) in active_overlaps.overlaps.iter() {
-            info!(
+            debug!(
                 "Overlap detected: {:?} + {:?} affecting {} enemies",
                 info.pattern_a,
                 info.pattern_b,

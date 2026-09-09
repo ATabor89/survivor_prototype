@@ -1,6 +1,6 @@
 # Project restart and dependency upgrade
 
-Assessment date: 2026-09-08. This records the current checkout and a proposed migration sequence; it does not upgrade dependencies.
+Assessment date: 2026-09-08. The assessment below records the **pre-migration** checkout. Implementation progress is recorded at the end of this document.
 
 ## Current checkout
 
@@ -87,3 +87,47 @@ These are source-review observations, not results of an interactive playtest.
 - Pause/resume and level-up menus freeze/resume both virtual time and physics; HUD does not duplicate on re-entry.
 - Test overlap behavior with circles whose effect ticks are deliberately offset, distinguishing the known baseline limitation from migration regressions.
 - Run targeted tests and formatting checks on the completed migration; document remaining warnings and deferred gameplay issues.
+
+## Implementation record
+
+The user approved the migration after the assessment. Work continues on `codex/dependency-upgrade`.
+
+| Checkpoint | Result |
+| --- | --- |
+| `8e81ab2` | Preserved existing source, legacy weapon file, overlap work, and design files |
+| `4975827` | Replaced the Git fork with published Rapier 0.28; compilation passed |
+| `3ad2572` | Bevy 0.16.1 / Rapier 0.30 / Lyon 0.14.1; compilation passed |
+| `85f4861` | Bevy 0.17.3 / Rapier 0.32 / Lyon 0.15; compilation passed |
+| `a0887f9` | Bevy 0.18.1 / Rapier 0.33 / Lyon 0.16; compilation passed |
+| `d23cd6b` | Bevy 0.19.1 / Rapier 0.36 / Lyon 0.17; compilation passed |
+
+All 41 original project files outside `.git` and `target` were also archived and verified byte-for-byte. The archive is now `.restart-backups/before-dependency-upgrade.zip`, ignored by Git and outside Cargo's build directory. Editor metadata and `nul` were left in place. The original branch was not advanced.
+
+Bevy 0.19.1 declares Rust 1.95 as its minimum. Installed Rust 1.96.0 satisfies that requirement; no toolchain update was needed. The manifest now records the minimum. Bevy is configured for 2D and UI rather than its full default 3D/audio feature set.
+
+The lockfile was refreshed after the old `wide` 0.7.28 dependency failed to provide a SIMD transpose required by current Rapier. `wide` 0.7.33 resolved that compile failure. Rand is now 0.10.2 and Strum is 0.28 with its derive feature, replacing the separate direct macro dependency.
+
+### Regression fixes
+
+The six headless regression tests run the real game plugins and Rapier. Their initial failures exposed the following issues, which are now fixed:
+
+- **Bevy 0.19 transform propagation:** Rapier's early transform pass needs `mark_dirty_trees` before it. Without this ordering, movement of the player (which has child entities) could be reset during physics writeback. The test verified that the local position changed before physics and was then overwritten, and now verifies movement survives the full frame.
+- **Overlap membership:** Spatial membership is now collected every frame, independently of damage tick timing. The test offsets two circle timers, checks their overlap over multiple frames, verifies damage still ticks at 0.5 seconds, then checks cleanup when the enemy exits.
+- **Protection:** Circle sensors now include kinematic/static collision detection so they can detect the kinematic player. Other collision groups and enemy detection remain in place.
+- **Upgrade progression:** Progression index zero is the level-1-to-2 upgrade. The original index skipped that first damage/area upgrade and reached limit breaks early. Keyboard and mouse tests now exercise the intended progression.
+- **Pattern selection:** The pending upgrade resource is removed after confirmation. The existing guard against consuming the opening keypress twice is retained and tested.
+- **Diagnostics:** Per-frame overlap reports use DEBUG rather than INFO.
+
+The suite also verifies pause/resume of time and physics, one XP orb/kill per enemy death, real XP sensor pickup, all five circle effects, recursive sigil cleanup, healing, and a single HUD after menu transitions. Combo effects themselves remain unfinished. The preserved legacy `src/weapon.rs` was not rewritten.
+
+### Final validation
+
+- `cargo test --locked`: 6 passed, including the default parallel test runner.
+- `cargo build --locked`: passed for the normal Windows executable.
+- Formatting and locked compilation checks passed; the dependency tree contains one Bevy version, 0.19.1.
+- Native visual playtest on Windows/Vulkan: player and enemy sprites, HUD, pause/resume, level-up and five-option pattern menus rendered; keyboard confirmation and mouse upgrade selection worked.
+- The first direct executable launch lacked the asset-root environment used by Cargo. Repeating with `BEVY_ASSET_ROOT` set to the repository root loaded the sprites; both corrected launch logs contained no asset or renderer errors. Direct launch instructions are in `README.md`.
+- The visual pass also replaced unsupported emoji placeholders with ASCII symbols and replaced raw upgrade-struct debug text with readable change descriptions.
+- There are 24 remaining dead-code warnings from prototype scaffolding. No dependency/API deprecation warnings remain in the application build.
+
+Interactive inspection was a smoke test, not a full balance or long-duration playtest. Linux, macOS, WebAssembly, and release-profile builds were not verified. Larger cleanup, persistent progression, complete end-game flows, and circle combo design remain future work.

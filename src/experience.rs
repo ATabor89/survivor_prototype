@@ -77,7 +77,10 @@ pub fn check_level_up(
     }
 }
 
-fn spawn_experience_orbs(mut commands: Commands, mut death_events: MessageReader<EntityDeathEvent>) {
+fn spawn_experience_orbs(
+    mut commands: Commands,
+    mut death_events: MessageReader<EntityDeathEvent>,
+) {
     for event in death_events.read() {
         if let Some(exp_value) = event.exp_value {
             commands.spawn((

@@ -8,10 +8,8 @@ rust-version = "1.95"
 bevy = { version = "0.19.1", default-features = false, features = ["2d", "ui"] }
 bevy_rapier2d = { version = "0.36", features = ["debug-render-2d"] }
 bevy_prototype_lyon = "0.17"
-rand = "0.8.5"
-strum = "0.26.3"
-strum_macros = "0.26.4"
-#bevy-panic-handler = "3.0.0"
+rand = "0.10.2"
+strum = { version = "0.28", features = ["derive"] }
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

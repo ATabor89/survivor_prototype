@@ -142,17 +142,14 @@ pub fn update_health_ui(
     if let Ok(player_health) = player_query.single() {
         // Update health bar width
         if let Ok(mut style) = health_bar_query.single_mut() {
-            let health_percent = (player_health.current as f32 / player_health.maximum as f32 * 100.0).max(0.0);
+            let health_percent =
+                (player_health.current as f32 / player_health.maximum as f32 * 100.0).max(0.0);
             style.width = Val::Percent(health_percent);
         }
 
         // Update health text
         if let Ok(mut text) = health_text_query.single_mut() {
-            text.0 = format!(
-                "{}/{}",
-                player_health.current,
-                player_health.maximum
-            );
+            text.0 = format!("{}/{}", player_health.current, player_health.maximum);
         }
     }
 }

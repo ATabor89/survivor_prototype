@@ -1,8 +1,8 @@
 # Survivors Prototype - Design Document
 
-> **Last Updated:** 2026-03-10
-> **Branch:** `magick_circle_pattern_select`
-> **Engine:** Bevy 0.15.0 (Rust)
+> **Last Updated:** 2026-09-08 (dependency migration; game design remains provisional)
+> **Branch:** `codex/dependency-upgrade`
+> **Engine:** Bevy 0.19.1 (Rust 1.95+, tested with 1.96)
 
 ---
 
@@ -90,11 +90,11 @@ An occult-themed survivors-like game inspired by Vampire Survivors and HoloCure,
 ### Tech Stack
 
 - **Language:** Rust (Edition 2021)
-- **Engine:** Bevy 0.15.0 (ECS architecture)
-- **Physics:** bevy_rapier2d (git master for Bevy 0.15 compat)
-- **Shape Rendering:** bevy_prototype_lyon 0.13.0
-- **RNG:** rand 0.8.5
-- **Enum Utilities:** strum / strum_macros 0.26
+- **Engine:** Bevy 0.19.1 (ECS architecture, 2D/UI features)
+- **Physics:** bevy_rapier2d 0.36.0 (published crate)
+- **Shape Rendering:** bevy_prototype_lyon 0.17.0
+- **RNG:** rand 0.10.2
+- **Enum Utilities:** strum 0.28 with the derive feature
 
 ### Source File Map
 
@@ -147,7 +147,7 @@ States are defined in `resources.rs` as `GameState`:
 - State-gated execution via `run_if(in_state(GameState::Playing))`
 - `ParamSet` used to avoid query conflicts in complex systems
 - Frame-scoped resources (`EnemyCircleHits`, `ActiveOverlaps`) cleared each frame
-- Events for decoupled communication: `DamageEvent`, `EntityDeathEvent`, `WeaponUpgradeConfirmedEvent`, `AddWeaponEvent`, etc.
+- Buffered messages for decoupled communication: `DamageEvent`, `EntityDeathEvent`, `WeaponUpgradeConfirmedEvent`, `AddWeaponEvent`, etc. (the existing type names are retained).
 
 ### Collision Groups (Rapier)
 
@@ -174,7 +174,7 @@ States are defined in `resources.rs` as `GameState`:
 
 **Movement** (`systems.rs: gameplay_movement_system`):
 - WASD input, normalized diagonal movement
-- Speed = base speed (150) as constant
+- Speed comes from `Player::speed`, initialized to 150
 
 ### 4.2 Enemies
 
@@ -191,7 +191,7 @@ States are defined in `resources.rs` as `GameState`:
 
 ### 4.3 Experience and Leveling
 
-**Orb Spawning** (`death.rs: spawn_experience_orbs`):
+**Orb Spawning** (`experience.rs: spawn_experience_orbs`):
 - On enemy death, drop XP orbs
 - XP value: `enemy_exp * 66` per orb
 
@@ -207,13 +207,13 @@ States are defined in `resources.rs` as `GameState`:
 
 **Damage System** (`combat.rs: handle_damage`):
 - Processes `DamageEvent` with source, target, amount
-- Cooldown protection: 0.25s between hits from same source type
+- Cooldown protection: 0.25s between hits on an entity with `DamageCooldown`, shared across sources
 - `ProtectionBuff` applies 50% damage reduction
-- Triggers `EntityDeathEvent` when health reaches 0
+- Marks the entity for death when health reaches 0; `death_system` emits `EntityDeathEvent`
 
 ### 4.5 Victory Condition
 
-- 200 kills triggers victory (prints to console; no victory screen yet)
+- A threshold of 200 kills is configured but not consumed by active code; victory handling and its screen remain unimplemented
 
 ---
 

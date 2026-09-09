@@ -524,11 +524,12 @@ pub fn handle_upgrade_selection_and_confirmation(
     }
 
     // Check keyboard/mouse selection
-    let enter_pressed = keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space);
+    let enter_pressed =
+        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space);
 
     for (menu_item, action_component, interaction) in &menu_items {
-        let should_confirm = (menu_item.selected && enter_pressed)
-            || *interaction == Interaction::Pressed;
+        let should_confirm =
+            (menu_item.selected && enter_pressed) || *interaction == Interaction::Pressed;
 
         if should_confirm {
             if let MenuAction::SelectUpgrade(upgrade_choice) = &action_component.action {
@@ -647,6 +648,7 @@ pub fn handle_pattern_select_menu(
                         weapon_type: pending.weapon_type,
                         upgrade_spec: pending.upgrade_spec.clone(),
                     });
+                    commands.remove_resource::<PendingAddCircleUpgrade>();
                 }
 
                 // Despawn the pattern menu

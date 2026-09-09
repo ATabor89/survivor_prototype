@@ -128,10 +128,13 @@ impl UpgradePool {
 
             // Convert each `WeaponUpgradeSpec` to an `UpgradeChoice`
             for spec in specs {
-                let description = format!(
-                    "{} Level {}: {:?}",
-                    weapon_meta.weapon_type, next_level, spec
-                );
+                let changes = spec
+                    .changes
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let description = format!("Level {next_level}: {changes}");
 
                 upgrades.push(UpgradeChoice {
                     upgrade_type: UpgradeType::Weapon(weapon_meta.weapon_type, spec.clone()),
@@ -152,7 +155,7 @@ impl UpgradePool {
         luck: &Luck,
         weapons: &[&WeaponMeta],
     ) -> Vec<UpgradeChoice> {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         // Determine the number of upgrades to show
         let count = Self::calculate_count(luck, &mut rng);
@@ -181,36 +184,40 @@ impl UpgradePool {
         choices
     }
 
-    fn calculate_count(luck: &Luck, rng: &mut impl Rng) -> usize {
+    fn calculate_count(luck: &Luck, rng: &mut impl RngExt) -> usize {
         const LUCK_FACTOR: f32 = 0.02;
-        if rng.gen::<f32>() < (luck.0 as f32) * LUCK_FACTOR {
+        if rng.random::<f32>() < (luck.0 as f32) * LUCK_FACTOR {
             4
         } else {
             3
         }
     }
 
-    fn select_random<T>(pool: &[T], count: usize, rng: &mut impl Rng) -> Vec<T>
+    fn select_random<T>(pool: &[T], count: usize, rng: &mut impl RngExt) -> Vec<T>
     where
         T: Clone,
     {
         pool.iter()
-            .choose_multiple(rng, count)
+            .sample(rng, count)
             .into_iter()
             .cloned()
             .collect()
     }
 
-    fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl Rng) -> Vec<T>
+    fn select_random_owned<T, I>(iter: I, count: usize, rng: &mut impl RngExt) -> Vec<T>
     where
         T: Clone,
         I: IntoIterator<Item = T>,
     {
-        iter.into_iter().choose_multiple(rng, count)
+        iter.into_iter().sample(rng, count)
     }
 }
 
-pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeChoice, is_first: bool) {
+pub fn spawn_upgrade_choice(
+    parent: &mut ChildSpawnerCommands,
+    choice: UpgradeChoice,
+    is_first: bool,
+) {
     let (icon, name, description) = get_upgrade_display_info(&choice);
 
     parent
@@ -284,7 +291,7 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
     match &choice.upgrade_type {
         UpgradeType::Weapon(weapon_type, ..) => {
             let icon = match weapon_type {
-                WeaponType::MagickCircle => "🔮",
+                WeaponType::MagickCircle => "O",
                 // We can add more weapon types here as we implement them
             };
             (
@@ -295,8 +302,8 @@ fn get_upgrade_display_info(choice: &UpgradeChoice) -> (&'static str, String, St
         }
         UpgradeType::Generic(generic_type) => {
             let icon = match generic_type {
-                GenericUpgrade::HealthPickup(_) => "⚗️",
-                GenericUpgrade::ResourcePickup(_) => "💎",
+                GenericUpgrade::HealthPickup(_) => "+",
+                GenericUpgrade::ResourcePickup(_) => "*",
             };
             (
                 icon,

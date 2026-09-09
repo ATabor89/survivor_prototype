@@ -12,8 +12,10 @@ use bevy_prototype_lyon::entity::Shape;
 use bevy_prototype_lyon::geometry::{ShapeBuilder, ShapeBuilderBase};
 use bevy_prototype_lyon::prelude::RegularPolygonFeature;
 use bevy_prototype_lyon::shapes;
-use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group, Sensor};
-use strum_macros::EnumIter;
+use bevy_rapier2d::geometry::{
+    ActiveCollisionTypes, ActiveEvents, Collider, CollisionGroups, Group, Sensor,
+};
+use strum::EnumIter;
 
 /// Specialized MagickCircle components
 #[derive(Component)]
@@ -92,7 +94,7 @@ impl PatternType {
                 sigil_sides: 6,   // hexagons — stable, locking
                 orbit_speed: 0.5, // slow, deliberate
                 rotation_speed: 0.4,
-                num_sigils: 6,    // forming a cage
+                num_sigils: 6, // forming a cage
             },
             // Teal/cyan — summoning, otherworldly pull
             PatternType::Invocation => PatternVisuals {
@@ -107,7 +109,7 @@ impl PatternType {
             PatternType::Manifestation => PatternVisuals {
                 circle_color: Color::srgba(0.2, 0.7, 0.1, 0.3),
                 sigil_color: Color::srgba(0.5, 0.9, 0.2, 0.8),
-                sigil_sides: 0,   // 6-pointed star — mystical
+                sigil_sides: 0, // 6-pointed star — mystical
                 orbit_speed: 0.8,
                 rotation_speed: 1.2,
                 num_sigils: 3,
@@ -116,7 +118,7 @@ impl PatternType {
             PatternType::Protection => PatternVisuals {
                 circle_color: Color::srgba(0.7, 0.8, 1.0, 0.35),
                 sigil_color: Color::srgba(0.9, 0.95, 1.0, 0.85),
-                sigil_sides: 4,   // diamonds — solid, stable
+                sigil_sides: 4, // diamonds — solid, stable
                 orbit_speed: 0.7,
                 rotation_speed: 0.6,
                 num_sigils: 4,
@@ -176,8 +178,7 @@ fn build_sigil_shape(sigil_size: f32, sigil_sides: u32, color: Color) -> Shape {
         let inner_r = sigil_size * 0.5;
         let points: Vec<Vec2> = (0..12)
             .map(|i| {
-                let angle =
-                    (i as f32) * std::f32::consts::TAU / 12.0 - std::f32::consts::FRAC_PI_2;
+                let angle = (i as f32) * std::f32::consts::TAU / 12.0 - std::f32::consts::FRAC_PI_2;
                 let r = if i % 2 == 0 { outer_r } else { inner_r };
                 Vec2::new(angle.cos() * r, angle.sin() * r)
             })
@@ -225,7 +226,10 @@ pub fn spawn_magick_circle_attack(
 
     let visuals = pattern_type.visuals();
 
-    info!("Spawning {:?} attack at position: {:?}", pattern_type, spawn_pos);
+    info!(
+        "Spawning {:?} attack at position: {:?}",
+        pattern_type, spawn_pos
+    );
     // First spawn the attack entity
     let attack_entity = commands
         .spawn((
@@ -254,6 +258,8 @@ pub fn spawn_magick_circle_attack(
             Sensor,
             Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
+            // Protection circles must also detect the kinematic player.
+            ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_STATIC,
             CollisionGroups::new(Group::GROUP_3, Group::GROUP_1 | Group::GROUP_2),
             pattern_type,
             WeaponMovement::Stationary,

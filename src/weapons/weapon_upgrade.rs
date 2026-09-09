@@ -1,8 +1,8 @@
 use crate::menu::WeaponUpgradeConfirmedEvent;
 use crate::weapons::magick_circle::PatternType;
 use crate::weapons::{WeaponArea, WeaponCooldown, WeaponDamage, WeaponMeta, WeaponType};
-use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
+use bevy::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WeaponUpgradeChange {
@@ -10,9 +10,7 @@ pub enum WeaponUpgradeChange {
     Area(i32),
     Cooldown(i32),
     Duration(i32),
-    AddCircle {
-        pattern: Option<PatternType>,
-    },
+    AddCircle { pattern: Option<PatternType> },
 }
 
 impl std::fmt::Display for WeaponUpgradeChange {
@@ -211,8 +209,10 @@ impl WeaponUpgradeConfig {
             .get(&weapon)
             .unwrap_or_else(|| panic!("Unable to find weapon {} in weapon upgrade config", weapon));
 
-        if level < weapon_upgrade_data.progression.len() as u32 {
-            vec![weapon_upgrade_data.progression[level as usize].clone()]
+        // Index zero describes the upgrade from weapon level 1 to level 2.
+        let index = level.checked_sub(1).expect("Weapon levels start at 1") as usize;
+        if let Some(upgrade) = weapon_upgrade_data.progression.get(index) {
+            vec![upgrade.clone()]
         } else {
             weapon_upgrade_data.limit_breaks.to_vec()
         }

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::image::TextureAtlasLayout;
+use bevy::prelude::*;
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
 pub enum GameState {
     #[default]

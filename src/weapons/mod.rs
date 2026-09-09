@@ -7,17 +7,16 @@ use crate::weapons::magick_circle::{
     apply_magick_circle_weapon_upgrades, spawn_magick_circle, spawn_magick_circle_attack,
     MagickCircle, PatternType,
 };
-use crate::weapons::overlap::{
-    overlap_detection_system, ActiveOverlaps, EnemyCircleHits,
-};
+use crate::weapons::overlap::{overlap_detection_system, ActiveOverlaps, EnemyCircleHits};
 use crate::weapons::weapon_upgrade::{
     apply_common_weapon_upgrades, update_weapon_level, WeaponUpgradeConfig,
 };
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::fmt::Formatter;
 use std::time::Duration;
-use strum_macros::EnumIter;
+use strum::EnumIter;
 
 pub mod magick_circle;
 pub mod overlap;
@@ -115,7 +114,7 @@ pub fn setup_player_inventory(
     for (player_entity, starting_weapon) in query.iter() {
         add_weapon_event.write(AddWeaponEvent {
             player: player_entity,
-            weapon_type: starting_weapon.0
+            weapon_type: starting_weapon.0,
         });
     }
 }
@@ -124,12 +123,12 @@ pub fn setup_player_inventory(
 pub fn handle_new_weapons(
     mut commands: Commands,
     mut events: MessageReader<AddWeaponEvent>,
-    mut weapon_pickup_counter: ResMut<WeaponPickupCounter>
+    mut weapon_pickup_counter: ResMut<WeaponPickupCounter>,
 ) {
     for event in events.read() {
         let pickup_id = weapon_pickup_counter.0;
         spawn_weapon(&mut commands, event.player, event.weapon_type, pickup_id);
-        
+
         weapon_pickup_counter.0 += 1;
     }
 }
@@ -247,7 +246,12 @@ pub struct Knockback {
 }
 
 /// Spawns a weapon for the player based on weapon type
-pub fn spawn_weapon(commands: &mut Commands, player_entity: Entity, weapon_type: WeaponType, pickup_id: u8) {
+pub fn spawn_weapon(
+    commands: &mut Commands,
+    player_entity: Entity,
+    weapon_type: WeaponType,
+    pickup_id: u8,
+) {
     match weapon_type {
         WeaponType::MagickCircle => spawn_magick_circle(commands, player_entity, pickup_id),
         // Add other weapon types here
@@ -403,7 +407,14 @@ pub fn area_effect_system(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
     mut effect_query: Query<
-        (Entity, &mut AreaEffect, &Damage, &Area, &PatternType, &Transform),
+        (
+            Entity,
+            &mut AreaEffect,
+            &Damage,
+            &Area,
+            &PatternType,
+            &Transform,
+        ),
         With<Attack>,
     >,
     mut damage_events: MessageWriter<DamageEvent>,
@@ -418,35 +429,37 @@ pub fn area_effect_system(
 
     // Clear previous frame's data; this resource is also read by overlap_detection_system
     enemy_circle_hits.hits.clear();
+    let mut ticking_circles: HashSet<Entity> = HashSet::default();
 
     // First pass: collect all circle effects affecting each enemy
-    for (circle_entity, mut area_effect, _, _, pattern, circle_transform) in
-        effect_query.iter_mut()
+    for (circle_entity, mut area_effect, _, _, pattern, circle_transform) in effect_query.iter_mut()
     {
         if time.elapsed_secs() - area_effect.last_tick >= area_effect.tick_rate {
             area_effect.last_tick = time.elapsed_secs();
-            let circle_pos = circle_transform.translation.truncate();
+            ticking_circles.insert(circle_entity);
+        }
+        let circle_pos = circle_transform.translation.truncate();
 
-            for (collider1, collider2, intersecting) in
-                rapier_context.intersection_pairs_with(circle_entity)
-            {
-                if !intersecting {
-                    continue;
-                }
+        // Spatial membership is continuous; only effect application is timed.
+        for (collider1, collider2, intersecting) in
+            rapier_context.intersection_pairs_with(circle_entity)
+        {
+            if !intersecting {
+                continue;
+            }
 
-                let enemy_entity = if collider1 == circle_entity {
-                    collider2
-                } else {
-                    collider1
-                };
+            let enemy_entity = if collider1 == circle_entity {
+                collider2
+            } else {
+                collider1
+            };
 
-                if enemy_query.contains(enemy_entity) {
-                    enemy_circle_hits
-                        .hits
-                        .entry(enemy_entity)
-                        .or_default()
-                        .push((circle_entity, *pattern, circle_pos));
-                }
+            if enemy_query.contains(enemy_entity) {
+                enemy_circle_hits
+                    .hits
+                    .entry(enemy_entity)
+                    .or_default()
+                    .push((circle_entity, *pattern, circle_pos));
             }
         }
     }
@@ -454,6 +467,9 @@ pub fn area_effect_system(
     // Second pass: apply per-pattern effects for each enemy
     for (enemy_entity, affecting_circles) in enemy_circle_hits.hits.iter() {
         for (circle_entity, pattern, circle_pos) in affecting_circles {
+            if !ticking_circles.contains(circle_entity) {
+                continue;
+            }
             match pattern {
                 PatternType::Banishment => {
                     if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {

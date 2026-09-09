@@ -18,6 +18,14 @@ impl Plugin for PhysicsPlugin {
         // Base physics setup
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
 
+        // Rapier propagates transforms before its simulation. Bevy 0.19's
+        // hierarchy optimization needs dirty trees marked before that pass,
+        // otherwise movement of a body with children can be overwritten.
+        app.add_systems(
+            PostUpdate,
+            bevy::transform::systems::mark_dirty_trees.before(RapierTransformPropagateSet),
+        );
+
         // Since RapierConfiguration is now a component, we'll need a startup system
         // to configure the physics world
         app.add_systems(Startup, configure_physics);
@@ -102,7 +110,10 @@ pub fn setup_physics_bodies(
                     RigidBody::KinematicPositionBased,
                     Collider::ball(12.0),
                     ActiveEvents::COLLISION_EVENTS,
-                    CollisionGroups::new(player_group, enemy_group | projectile_group | experience_group),
+                    CollisionGroups::new(
+                        player_group,
+                        enemy_group | projectile_group | experience_group,
+                    ),
                     Velocity::zero(),
                     LockedAxes::ROTATION_LOCKED,
                 ))

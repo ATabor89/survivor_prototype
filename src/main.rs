@@ -12,6 +12,9 @@ mod ui;
 mod upgrade;
 mod weapons;
 
+#[cfg(test)]
+mod tests;
+
 use crate::combat::{handle_damage, DamageEvent};
 use crate::death::{cleanup_marked_entities, death_system};
 use crate::events::EntityDeathEvent;
@@ -165,7 +168,6 @@ fn main() {
                     ..Default::default()
                 }),
         )
-        // .add_plugins(bevy_panic_handler::PanicHandler::new().build())
         .add_plugins(ShapePlugin)
         .add_plugins(SurvivorsGamePlugin)
         .run();
