@@ -68,7 +68,7 @@ pub fn spawn_ui(mut commands: Commands) {
                     ..default()
                 },
                 TextFont {
-                    font_size: 24.0,
+                    font_size: FontSize::Px(24.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -90,7 +90,7 @@ pub fn spawn_ui(mut commands: Commands) {
                     ..default()
                 },
                 TextFont {
-                    font_size: 32.0,
+                    font_size: FontSize::Px(32.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -101,7 +101,7 @@ pub fn spawn_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("Kills: 0"),
                 TextFont {
-                    font_size: 24.0,
+                    font_size: FontSize::Px(24.0),
                     ..default()
                 },
                 Node {

@@ -243,7 +243,7 @@ pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeCh
             parent.spawn((
                 Text::new(icon),
                 TextFont {
-                    font_size: 32.0, // Made larger
+                    font_size: FontSize::Px(32.0), // Made larger
                     ..default()
                 },
                 TextColor(menu::get_rarity_color(&choice.rarity)),
@@ -261,7 +261,7 @@ pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeCh
                     parent.spawn((
                         Text::new(name),
                         TextFont {
-                            font_size: 24.0, // Made larger
+                            font_size: FontSize::Px(24.0), // Made larger
                             ..default()
                         },
                         TextColor(menu::get_rarity_color(&choice.rarity)),
@@ -271,7 +271,7 @@ pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeCh
                     parent.spawn((
                         Text::new(description),
                         TextFont {
-                            font_size: 18.0, // Made larger
+                            font_size: FontSize::Px(18.0), // Made larger
                             ..default()
                         },
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),

@@ -41,13 +41,13 @@ impl Plugin for MenuPlugin {
                     handle_upgrade_selection_and_confirmation,
                 )
                     .chain()
-                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
+                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
             )
             .add_systems(
                 Update,
                 handle_pattern_select_menu
                     .after(handle_upgrade_selection_and_confirmation)
-                    .run_if(in_state(GameState::LevelUp).or(in_state(GameState::Paused))),
+                    .run_if(in_state(GameState::LevelUp).or_else(in_state(GameState::Paused))),
             )
             // State transitions
             .add_systems(OnEnter(GameState::Paused), spawn_pause_menu)
@@ -182,7 +182,7 @@ pub fn spawn_level_up_menu(
                     parent.spawn((
                         Text::new("Level Up!"),
                         TextFont {
-                            font_size: 48.0, // Made larger
+                            font_size: FontSize::Px(48.0), // Made larger
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.8, 0.0)), // Gold color
@@ -230,7 +230,7 @@ pub fn spawn_pattern_select_menu(commands: &mut Commands) {
                     parent.spawn((
                         Text::new("Select Circle Pattern"),
                         TextFont {
-                            font_size: 48.0,
+                            font_size: FontSize::Px(48.0),
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 0.8, 0.0)),
@@ -360,7 +360,7 @@ pub fn spawn_menu_button(
             parent.spawn((
                 Text::new(text),
                 TextFont {
-                    font_size: 20.0,
+                    font_size: FontSize::Px(20.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -397,7 +397,7 @@ pub fn spawn_pattern_button(
             parent.spawn((
                 Text::new(title),
                 TextFont {
-                    font_size: 22.0,
+                    font_size: FontSize::Px(22.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -406,7 +406,7 @@ pub fn spawn_pattern_button(
             parent.spawn((
                 Text::new(description),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.7)),

@@ -261,7 +261,7 @@ pub fn enemy_movement(
                 }
             }
 
-            velocity.linvel = final_velocity;
+            velocity.linear = final_velocity;
         }
     }
 }
