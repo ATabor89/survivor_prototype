@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15.0"
-#bevy_rapier2d = { version = "0.27.0", features = ["debug-render-2d"] }
-bevy_rapier2d = { git = "https://github.com/Vrixyz/bevy_rapier", branch = "master-bevy_0.15", features = ["debug-render-2d"] }
+bevy_rapier2d = { version = "0.28", features = ["debug-render-2d"] }
 bevy_prototype_lyon = "0.13.0"
 rand = "0.8.5"
 strum = "0.26.3"
