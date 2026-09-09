@@ -7,7 +7,7 @@ use crate::types::{EquipmentType, Rarity, StatType};
 use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::color::{Alpha, Color};
-use bevy::hierarchy::{BuildChildren, ChildBuilder};
+
 use bevy::log::info;
 use bevy::prelude::*;
 use rand::prelude::*;
@@ -20,7 +20,7 @@ pub fn handle_generic_upgrade(
     for generic_upgrade_event in upgrade_events.read() {
         match generic_upgrade_event.generic_upgrade_type {
             GenericUpgrade::HealthPickup(amount) => {
-                if let Ok(mut health) = player_query.get_single_mut() {
+                if let Ok(mut health) = player_query.single_mut() {
                     let new_health = (health.current + amount).min(health.maximum);
                     info!(
                         "Healing player for {amount} (from {current} to {new})",
@@ -210,7 +210,7 @@ impl UpgradePool {
     }
 }
 
-pub fn spawn_upgrade_choice(parent: &mut ChildBuilder, choice: UpgradeChoice, is_first: bool) {
+pub fn spawn_upgrade_choice(parent: &mut ChildSpawnerCommands, choice: UpgradeChoice, is_first: bool) {
     let (icon, name, description) = get_upgrade_display_info(&choice);
 
     parent

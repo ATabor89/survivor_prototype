@@ -2,7 +2,7 @@ use crate::menu::WeaponUpgradeConfirmedEvent;
 use crate::weapons::magick_circle::PatternType;
 use crate::weapons::{WeaponArea, WeaponCooldown, WeaponDamage, WeaponMeta, WeaponType};
 use bevy::prelude::*;
-use bevy::utils::HashMap;
+use bevy::platform::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WeaponUpgradeChange {

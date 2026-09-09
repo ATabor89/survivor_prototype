@@ -38,41 +38,17 @@ impl Plugin for PhysicsPlugin {
     }
 }
 
-fn configure_physics(
-    mut commands: Commands,
-    rapier_query: Query<(Entity, Option<&RapierConfiguration>), With<RapierContext>>,
-) {
-    match rapier_query.get_single() {
-        Ok((entity, maybe_config)) => {
-            if maybe_config.is_none() {
-                info!(
-                    "Adding RapierConfiguration to existing RapierContext entity {:?}",
-                    entity
-                );
-                commands.entity(entity).insert(RapierConfiguration {
-                    gravity: Vec2::ZERO,
-                    physics_pipeline_active: true,
-                    query_pipeline_active: true,
-                    scaled_shape_subdivision: 10,
-                    force_update_from_transform_changes: false,
-                });
-            }
-        }
-        Err(QuerySingleError::NoEntities(_)) => {
-            error!("No RapierContext found! Physics systems may not initialize correctly.");
-        }
-        Err(QuerySingleError::MultipleEntities(_)) => {
-            error!("Multiple RapierContext components found! This may cause physics issues.");
-        }
+fn configure_physics(mut configurations: Query<&mut RapierConfiguration>) {
+    for mut configuration in &mut configurations {
+        configuration.gravity = Vec2::ZERO;
     }
 }
-
 fn verify_physics_config(
     config_query: Query<(Entity, &RapierConfiguration)>,
-    context_query: Query<Entity, With<RapierContext>>,
+    context_query: Query<Entity, With<DefaultRapierContext>>,
 ) {
     // Log RapierConfiguration status
-    match config_query.get_single() {
+    match config_query.single() {
         Ok((entity, config)) => {
             info!(
                 "Physics world found on entity {:?} with gravity: {:?}",
@@ -107,17 +83,6 @@ fn verify_physics_config(
     }
 }
 
-pub(crate) fn handle_rapier_context_error(error: QuerySingleError) -> ! {
-    match error {
-        QuerySingleError::NoEntities(_) => {
-            panic!("No RapierContext found in world! This suggests the physics world was not properly initialized.");
-        }
-        QuerySingleError::MultipleEntities(count) => {
-            panic!("Found {} RapierContext components! Expected exactly one. This may be caused by multiple physics worlds being created.", count);
-        }
-    }
-}
-
 pub fn setup_physics_bodies(
     mut commands: Commands,
     new_players: Query<Entity, (Added<Player>, Without<RigidBody>)>,
@@ -130,7 +95,7 @@ pub fn setup_physics_bodies(
 
     // Player setup
     for entity in new_players.iter() {
-        if commands.get_entity(entity).is_some() {
+        if commands.get_entity(entity).is_ok() {
             commands
                 .entity(entity)
                 .insert((
@@ -156,7 +121,7 @@ pub fn setup_physics_bodies(
 
     // Enemy setup
     for entity in new_enemies.iter() {
-        if commands.get_entity(entity).is_some() {
+        if commands.get_entity(entity).is_ok() {
             commands.entity(entity).insert((
                 RigidBody::Dynamic,
                 Collider::ball(12.0),
@@ -174,7 +139,7 @@ pub fn setup_physics_bodies(
 }
 
 pub fn handle_player_enemy_collision(
-    context_query: Query<&RapierContext>,
+    context_query: ReadRapierContext,
     player_query: Query<(Entity, &Transform), With<Player>>,
     enemy_query: Query<
         Entity,
@@ -184,14 +149,14 @@ pub fn handle_player_enemy_collision(
             Without<MarkedForDeath>,
         ),
     >,
-    damage_sensor_query: Query<(Entity, &Parent), With<DamageSensor>>,
+    damage_sensor_query: Query<(Entity, &ChildOf), With<DamageSensor>>,
     mut damage_events: EventWriter<DamageEvent>,
 ) {
     // Get player entity and their damage sensor
-    let (player_entity, sensor_entity) = if let Ok((player_entity, _)) = player_query.get_single() {
+    let (player_entity, sensor_entity) = if let Ok((player_entity, _)) = player_query.single() {
         if let Some((sensor_entity, _)) = damage_sensor_query
             .iter()
-            .find(|(_, parent)| parent.get() == player_entity)
+            .find(|(_, parent)| parent.parent() == player_entity)
         {
             (player_entity, sensor_entity)
         } else {
@@ -204,8 +169,8 @@ pub fn handle_player_enemy_collision(
     // Count intersecting enemies that aren't marked for death/despawn
     let mut intersecting_enemies = 0;
     let rapier_context = context_query
-        .get_single()
-        .unwrap_or_else(|e| handle_rapier_context_error(e));
+        .single()
+        .expect("Expected one initialized Rapier context");
 
     for (collider1, collider2, intersecting) in
         rapier_context.intersection_pairs_with(sensor_entity)
@@ -227,7 +192,7 @@ pub fn handle_player_enemy_collision(
 
     // Send damage event if there are intersecting enemies
     if intersecting_enemies > 0 {
-        damage_events.send(DamageEvent {
+        damage_events.write(DamageEvent {
             target: player_entity,
             amount: 1 * intersecting_enemies,
             source: None,

@@ -8,13 +8,11 @@ use bevy::color::Color;
 use bevy::log::info;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::*;
-use bevy_prototype_lyon::draw::Fill;
-use bevy_prototype_lyon::entity::ShapeBundle;
-use bevy_prototype_lyon::geometry::GeometryBuilder;
+use bevy_prototype_lyon::entity::Shape;
+use bevy_prototype_lyon::geometry::{ShapeBuilder, ShapeBuilderBase};
 use bevy_prototype_lyon::prelude::RegularPolygonFeature;
 use bevy_prototype_lyon::shapes;
 use bevy_rapier2d::geometry::{ActiveEvents, Collider, CollisionGroups, Group, Sensor};
-use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 /// Specialized MagickCircle components
@@ -169,9 +167,9 @@ pub fn spawn_magick_circle(commands: &mut Commands, player_entity: Entity, picku
     });
 }
 
-/// Builds the lyon `Path` for a sigil shape based on the number of sides.
+/// Builds a filled sigil shape based on the number of sides.
 /// `sides == 0` produces a 6-pointed star; any other value produces a regular polygon.
-fn build_sigil_path(sigil_size: f32, sigil_sides: u32) -> bevy_prototype_lyon::entity::Path {
+fn build_sigil_shape(sigil_size: f32, sigil_sides: u32, color: Color) -> Shape {
     if sigil_sides == 0 {
         // 6-pointed star: alternating outer and inner vertices
         let outer_r = sigil_size;
@@ -184,19 +182,21 @@ fn build_sigil_path(sigil_size: f32, sigil_sides: u32) -> bevy_prototype_lyon::e
                 Vec2::new(angle.cos() * r, angle.sin() * r)
             })
             .collect();
-        GeometryBuilder::new()
+        ShapeBuilder::new()
             .add(&shapes::Polygon {
                 points,
                 closed: true,
             })
+            .fill(color)
             .build()
     } else {
-        GeometryBuilder::new()
+        ShapeBuilder::new()
             .add(&shapes::RegularPolygon {
                 sides: sigil_sides as usize,
                 center: Vec2::ZERO,
                 feature: RegularPolygonFeature::Radius(sigil_size),
             })
+            .fill(color)
             .build()
     }
 }
@@ -244,17 +244,13 @@ pub fn spawn_magick_circle_attack(
                 tick_rate: 0.5,
                 last_tick: 0.0,
             },
-            ShapeBundle {
-                path: GeometryBuilder::new()
-                    .add(&shapes::Circle {
-                        radius,
-                        center: Vec2::ZERO,
-                    })
-                    .build(),
-                transform: Transform::from_translation(spawn_pos),
-                ..default()
-            },
-            Fill::color(visuals.circle_color),
+            ShapeBuilder::with(&shapes::Circle {
+                radius,
+                center: Vec2::ZERO,
+            })
+            .fill(visuals.circle_color)
+            .build(),
+            Transform::from_translation(spawn_pos),
             Sensor,
             Collider::ball(radius),
             ActiveEvents::COLLISION_EVENTS,
@@ -279,12 +275,7 @@ pub fn spawn_magick_circle_attack(
                     speed: visuals.orbit_speed,
                     current_angle: (i as f32) * std::f32::consts::TAU / actual_num_sigils as f32,
                 },
-                ShapeBundle {
-                    path: build_sigil_path(sigil_size, visuals.sigil_sides),
-                    transform: Transform::default(),
-                    ..default()
-                },
-                Fill::color(visuals.sigil_color),
+                build_sigil_shape(sigil_size, visuals.sigil_sides, visuals.sigil_color),
             ))
             .id();
 

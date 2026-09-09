@@ -18,10 +18,10 @@ pub fn death_system(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // Check player death first
-    if let Ok((entity, health)) = player_query.get_single() {
+    if let Ok((entity, health)) = player_query.single() {
         if health.current <= 0 {
             commands.entity(entity).insert(MarkedForDespawn);
-            death_events.send(EntityDeathEvent {
+            death_events.write(EntityDeathEvent {
                 entity,
                 position: Vec2::ZERO, // Player position if needed
                 exp_value: None,
@@ -38,7 +38,7 @@ pub fn death_system(
         }
 
         // Send death event before despawning
-        death_events.send(EntityDeathEvent {
+        death_events.write(EntityDeathEvent {
             entity,
             position: transform.map_or(Vec2::ZERO, |t| t.translation.truncate()),
             exp_value: enemy.map(|e| e.experience_value * 66),
@@ -54,6 +54,6 @@ pub fn cleanup_marked_entities(
     query: Query<Entity, With<MarkedForDespawn>>,
 ) {
     for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

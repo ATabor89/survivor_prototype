@@ -63,7 +63,7 @@ pub fn check_level_up(
     mut player_query: Query<&mut Experience, With<Player>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if let Ok(mut experience) = player_query.get_single_mut() {
+    if let Ok(mut experience) = player_query.single_mut() {
         let xp_needed = calculate_experience_needed(experience.level);
 
         if experience.current >= xp_needed {
@@ -118,7 +118,7 @@ fn vacuum_system(
     // Collect player data first
     let player_data = {
         let player_query = params.p0();
-        if let Ok((transform, player)) = player_query.get_single() {
+        if let Ok((transform, player)) = player_query.single() {
             Some((
                 transform.translation,
                 player.magnet_strength,
@@ -162,7 +162,7 @@ fn collect_experience_orbs(
     orb_query: Query<(Entity, &ExperienceOrb), Without<MarkedForDespawn>>,
     mut collision_events: EventReader<CollisionEvent>,
 ) {
-    let Ok((player_entity, mut player_exp)) = player_query.get_single_mut() else {
+    let Ok((player_entity, mut player_exp)) = player_query.single_mut() else {
         return;
     };
 

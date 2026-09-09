@@ -61,9 +61,9 @@ pub fn load_textures(
     });
 }
 
-pub fn quit_game(mut app_exit_events: ResMut<Events<AppExit>>) {
+pub fn quit_game(mut app_exit_events: EventWriter<AppExit>) {
     info!("quit_game system called");
-    app_exit_events.send(AppExit::Success);
+    app_exit_events.write(AppExit::Success);
 }
 
 // Each input handler is focused but can check game state
@@ -122,7 +122,7 @@ pub fn handle_pause_state(
     mut time: ResMut<Time<Virtual>>,
     game_state: Res<State<GameState>>,
 ) {
-    if let Ok(mut rapier_config) = config_query.get_single_mut() {
+    if let Ok(mut rapier_config) = config_query.single_mut() {
         match game_state.get() {
             GameState::Playing => {
                 // Resume physics and time
@@ -188,8 +188,8 @@ pub fn spawn_enemies(
     if timer.0.tick(time.delta()).just_finished()
         && enemy_query.iter().count() < wave_config.max_enemies as usize
     {
-        // Use get_single() instead of single() to handle missing player gracefully
-        let player_transform = match player_query.get_single() {
+        // Use single() instead of single() to handle missing player gracefully
+        let player_transform = match player_query.single() {
             Ok(transform) => transform,
             Err(_) => return, // If no player exists, just return
         };
@@ -234,7 +234,7 @@ pub fn enemy_movement(
     binding_query: Query<&BindingEffect>,
     pull_query: Query<&InvocationPull>,
 ) {
-    if let Ok(player_transform) = player_query.get_single() {
+    if let Ok(player_transform) = player_query.single() {
         for (entity, transform, enemy, mut velocity) in enemy_query.iter_mut() {
             let direction = (player_transform.translation - transform.translation).normalize();
             let base_velocity = direction.truncate() * enemy.speed * 0.8;

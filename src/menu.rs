@@ -8,7 +8,7 @@ use crate::weapons::magick_circle::PatternType;
 use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::prelude::*;
-use bevy_rapier2d::na::DimAdd;
+
 use strum::IntoEnumIterator;
 
 // Plugin to organize it all
@@ -129,7 +129,7 @@ pub fn spawn_level_up_menu(
         return;
     }
 
-    let Ok((_player, luck)) = luck_query.get_single() else {
+    let Ok((_player, luck)) = luck_query.single() else {
         panic!("Unable to get player luck");
     };
 
@@ -209,7 +209,7 @@ pub fn spawn_pattern_select_menu(commands: &mut Commands) {
                 ..default()
             },
             GlobalZIndex(100),
-            BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
             MenuRoot {
                 menu_type: MenuType::PatternSelect,
             },
@@ -263,7 +263,7 @@ pub(crate) fn get_rarity_color(rarity: &Rarity) -> Color {
 // Navigation systems
 pub fn menu_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut menu_query: Query<(Entity, &mut MenuItem, &MenuActionComponent, &Parent), With<Button>>,
+    mut menu_query: Query<(Entity, &mut MenuItem, &MenuActionComponent, &ChildOf), With<Button>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let mut items: Vec<_> = menu_query.iter_mut().collect();
@@ -337,7 +337,7 @@ pub fn spawn_pause_menu(mut commands: Commands, existing_menu: Query<(Entity, &M
 
 // Helper function to spawn menu buttons
 pub fn spawn_menu_button(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     text: &str,
     action: MenuAction,
     selected: bool,
@@ -370,7 +370,7 @@ pub fn spawn_menu_button(
 
 // Specialized button for pattern selection - wider with title + description layout
 pub fn spawn_pattern_button(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     title: &str,
     description: &str,
     action: MenuAction,
@@ -415,8 +415,8 @@ pub fn spawn_pattern_button(
 }
 
 pub fn spawn_menu_container(
-    parent: &mut ChildBuilder,
-    spawn_content: impl FnOnce(&mut ChildBuilder),
+    parent: &mut ChildSpawnerCommands,
+    spawn_content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     parent
         .spawn((
@@ -441,7 +441,7 @@ pub fn cleanup_menu_state(
     query: Query<Entity, (With<MenuRoot>, Without<MarkedForDespawn>)>,
 ) {
     for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -461,7 +461,7 @@ pub fn update_menu_buttons(
 
         // Update text color for all text children
         let is_highlighted = menu_item.selected || matches!(interaction, Interaction::Hovered);
-        for (i, &child) in children.iter().enumerate() {
+        for (i, child) in children.iter().enumerate() {
             if let Ok((_, mut text_color)) = text_query.get_mut(child) {
                 text_color.0 = if is_highlighted {
                     if i == 0 {
@@ -542,7 +542,7 @@ pub fn handle_upgrade_selection_and_confirmation(
                         if has_add_circle {
                             // 2. Despawn the level-up menu so we can show pattern-select
                             for (menu_entity, _) in &menu_query {
-                                commands.entity(menu_entity).despawn_recursive();
+                                commands.entity(menu_entity).despawn();
                             }
 
                             // 3. Insert a resource telling us which upgrade we’re finalizing
@@ -558,27 +558,27 @@ pub fn handle_upgrade_selection_and_confirmation(
                             // We’ll do that after pattern selection.
                         } else {
                             // Normal upgrade that doesn't require pattern selection
-                            weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
+                            weapon_upgrade_events.write(WeaponUpgradeConfirmedEvent {
                                 weapon_type: *weapon_type,
                                 upgrade_spec: upgrade_spec.clone(),
                             });
 
                             // Despawn menu and go back to playing
                             for (menu_entity, _) in &menu_query {
-                                commands.entity(menu_entity).despawn_recursive();
+                                commands.entity(menu_entity).despawn();
                             }
                             next_state.set(GameState::Playing);
                         }
                     }
                     UpgradeType::Generic(generic_upgrade) => {
                         // This is a normal generic upgrade
-                        generic_upgrade_events.send(GenericUpgradeConfirmedEvent {
+                        generic_upgrade_events.write(GenericUpgradeConfirmedEvent {
                             generic_upgrade_type: generic_upgrade.clone(),
                         });
 
                         // Despawn and return to gameplay
                         for (menu_entity, _) in &menu_query {
-                            commands.entity(menu_entity).despawn_recursive();
+                            commands.entity(menu_entity).despawn();
                         }
                         next_state.set(GameState::Playing);
                     }
@@ -643,7 +643,7 @@ pub fn handle_pattern_select_menu(
                     }
 
                     // Now that we have a real pattern, we can finalize
-                    weapon_upgrade_events.send(WeaponUpgradeConfirmedEvent {
+                    weapon_upgrade_events.write(WeaponUpgradeConfirmedEvent {
                         weapon_type: pending.weapon_type,
                         upgrade_spec: pending.upgrade_spec.clone(),
                     });
@@ -652,7 +652,7 @@ pub fn handle_pattern_select_menu(
                 // Despawn the pattern menu
                 for (entity, menu_type) in &menu_query {
                     if *menu_type == MenuType::PatternSelect {
-                        commands.entity(entity).despawn_recursive();
+                        commands.entity(entity).despawn();
                     }
                 }
 

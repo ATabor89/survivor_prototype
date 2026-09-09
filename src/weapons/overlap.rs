@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::utils::{HashMap, HashSet};
+use bevy::platform::collections::{HashMap, HashSet};
 
 use crate::weapons::magick_circle::PatternType;
 

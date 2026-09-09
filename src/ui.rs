@@ -118,7 +118,7 @@ pub fn spawn_ui(mut commands: Commands) {
 
 pub fn cleanup_ui(mut commands: Commands, ui_query: Query<Entity, With<GameUI>>) {
     for entity in ui_query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -126,7 +126,7 @@ pub fn update_game_timer(
     time: Res<Time<Virtual>>,
     mut timer_query: Query<&mut Text, With<GameTimer>>,
 ) {
-    if let Ok(mut text) = timer_query.get_single_mut() {
+    if let Ok(mut text) = timer_query.single_mut() {
         let total_secs = time.elapsed_secs() as u32;
         let minutes = total_secs / 60;
         let seconds = total_secs % 60;
@@ -139,15 +139,15 @@ pub fn update_health_ui(
     mut health_text_query: Query<&mut Text, With<HealthText>>,
     player_query: Query<&Health, With<Player>>,
 ) {
-    if let Ok(player_health) = player_query.get_single() {
+    if let Ok(player_health) = player_query.single() {
         // Update health bar width
-        if let Ok(mut style) = health_bar_query.get_single_mut() {
+        if let Ok(mut style) = health_bar_query.single_mut() {
             let health_percent = (player_health.current as f32 / player_health.maximum as f32 * 100.0).max(0.0);
             style.width = Val::Percent(health_percent);
         }
 
         // Update health text
-        if let Ok(mut text) = health_text_query.get_single_mut() {
+        if let Ok(mut text) = health_text_query.single_mut() {
             text.0 = format!(
                 "{}/{}",
                 player_health.current,
@@ -161,7 +161,7 @@ pub fn update_kill_counter(
     game_stats: Res<GameStats>,
     mut kill_counter_query: Query<&mut Text, With<KillCounter>>,
 ) {
-    if let Ok(mut text) = kill_counter_query.get_single_mut() {
+    if let Ok(mut text) = kill_counter_query.single_mut() {
         text.0 = format!("Kills: {}", game_stats.enemies_killed);
     }
 }

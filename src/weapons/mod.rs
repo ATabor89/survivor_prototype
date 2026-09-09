@@ -1,7 +1,7 @@
 use crate::combat::DamageEvent;
 use crate::components::{AreaMultiplier, CooldownReduction, DamageMultiplier, Enemy, Player};
 use crate::death::MarkedForDeath;
-use crate::physics::handle_rapier_context_error;
+
 use crate::resources::GameState;
 use crate::weapons::magick_circle::{
     apply_magick_circle_weapon_upgrades, spawn_magick_circle, spawn_magick_circle_attack,
@@ -113,7 +113,7 @@ pub fn setup_player_inventory(
     mut add_weapon_event: EventWriter<AddWeaponEvent>,
 ) {
     for (player_entity, starting_weapon) in query.iter() {
-        add_weapon_event.send(AddWeaponEvent {
+        add_weapon_event.write(AddWeaponEvent {
             player: player_entity,
             weapon_type: starting_weapon.0
         });
@@ -272,7 +272,7 @@ pub fn weapon_firing_system(
     // Query weapons and their stats
     mut weapon_query: Query<(
         Entity,
-        &Parent,
+        &ChildOf,
         &mut WeaponCooldown,
         &WeaponDamage,
         &WeaponArea,
@@ -292,7 +292,7 @@ pub fn weapon_firing_system(
             damage_multiplier,
             area_multiplier,
             player_transform,
-        )) = player_query.get(parent.get())
+        )) = player_query.get(parent.parent())
         {
             // info!("Found player stats - CD reduction: {}, damage mult: {}, area mult: {}",
             //     cooldown_reduction.percent,
@@ -379,7 +379,7 @@ fn update_weapon_positions(
     )>,
 ) {
     // First get the player position
-    let player_pos = if let Ok(player_transform) = param_set.p1().get_single() {
+    let player_pos = if let Ok(player_transform) = param_set.p1().single() {
         player_transform.translation
     } else {
         return;
@@ -408,13 +408,13 @@ pub fn area_effect_system(
     >,
     mut damage_events: EventWriter<DamageEvent>,
     mut binding_events: EventWriter<BindingEvent>,
-    context_query: Query<&RapierContext>,
+    context_query: ReadRapierContext,
     enemy_query: Query<Entity, (With<Enemy>, Without<MarkedForDeath>)>,
     mut enemy_circle_hits: ResMut<EnemyCircleHits>,
 ) {
     let rapier_context = context_query
-        .get_single()
-        .unwrap_or_else(|e| handle_rapier_context_error(e));
+        .single()
+        .expect("Expected one initialized Rapier context");
 
     // Clear previous frame's data; this resource is also read by overlap_detection_system
     enemy_circle_hits.hits.clear();
@@ -457,7 +457,7 @@ pub fn area_effect_system(
             match pattern {
                 PatternType::Banishment => {
                     if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {
-                        damage_events.send(DamageEvent {
+                        damage_events.write(DamageEvent {
                             target: *enemy_entity,
                             amount: damage.amount,
                             source: Some(*circle_entity),
@@ -465,7 +465,7 @@ pub fn area_effect_system(
                     }
                 }
                 PatternType::Binding => {
-                    binding_events.send(BindingEvent {
+                    binding_events.write(BindingEvent {
                         target: *enemy_entity,
                         strength: 1.0,
                         source: *circle_entity,
@@ -481,7 +481,7 @@ pub fn area_effect_system(
                 PatternType::Manifestation => {
                     // Periodic damage burst — deals 1.5x the circle's base damage
                     if let Ok((_, _, damage, _, _, _)) = effect_query.get(*circle_entity) {
-                        damage_events.send(DamageEvent {
+                        damage_events.write(DamageEvent {
                             target: *enemy_entity,
                             amount: (damage.amount as f32 * 1.5) as i32,
                             source: Some(*circle_entity),
@@ -568,16 +568,16 @@ pub struct ProtectionBuff {
 /// GROUP_1 | GROUP_2, player is GROUP_1 filtering for GROUP_3).
 pub fn protection_system(
     mut commands: Commands,
-    context_query: Query<&RapierContext>,
+    context_query: ReadRapierContext,
     player_query: Query<Entity, With<Player>>,
     protection_circles: Query<(Entity, &PatternType), With<Attack>>,
 ) {
-    let Ok(player_entity) = player_query.get_single() else {
+    let Ok(player_entity) = player_query.single() else {
         return;
     };
     let rapier_context = context_query
-        .get_single()
-        .unwrap_or_else(|e| handle_rapier_context_error(e));
+        .single()
+        .expect("Expected one initialized Rapier context");
 
     let mut inside_protection = false;
 
@@ -625,7 +625,7 @@ pub fn attack_lifetime_system(
         lifetime.timer.tick(time.delta());
         if lifetime.timer.finished() {
             // First check if the entity still exists
-            if commands.get_entity(entity).is_some() {
+            if commands.get_entity(entity).is_ok() {
                 commands.entity(entity).insert(MarkedForDeath);
             }
         }
