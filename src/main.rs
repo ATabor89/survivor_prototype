@@ -25,6 +25,7 @@ mod systems;
 mod telemetry;
 mod types;
 mod ui;
+mod ui_button;
 mod upgrade;
 mod waves;
 mod weapons;
@@ -113,6 +114,7 @@ impl Plugin for SurvivorsGamePlugin {
             // States
             .insert_state(GameState::Playing)
             // Plugins
+            .add_plugins(ui_button::UiButtonPlugin)
             .add_plugins(MenuPlugin)
             .add_plugins(PhysicsPlugin)
             .add_plugins(ExperiencePlugin)

@@ -1,6 +1,6 @@
 # Survivors Prototype
 
-An occult-themed 2D survivors prototype built with Bevy 0.19, Rapier, and Lyon.
+An occult-themed 2D survivors prototype built with Bevy 0.20, Rapier, and Lyon.
 Build an inventory of Magick Circles, Inscribed Needles, Alchemical Vessels, and
 passive items while collecting experience, breaking props for supplies, and
 surviving authored enemy phases and boss encounters.
@@ -10,8 +10,9 @@ maps demonstrate timed survival. Death and victory both lead to a run summary.
 
 ## Build and run
 
-Use Rust **1.95 or newer** with the Windows MSVC toolchain and Visual Studio C++
-build tools. The dependency migration was built and tested with Rust **1.96.0**.
+Use Rust **1.97.1 or newer** (Bevy 0.20's minimum; run `rustup update` if needed)
+with the Windows MSVC toolchain and Visual Studio C++ build tools. The Bevy 0.20
+migration was built and tested with Rust **1.99.1**.
 Run commands from the repository root so the game can find `assets/`:
 
 ```sh

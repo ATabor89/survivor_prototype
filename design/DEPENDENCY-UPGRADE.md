@@ -132,3 +132,26 @@ The suite also verifies pause/resume of time and physics, one XP orb/kill per en
 - There are 24 remaining dead-code warnings from prototype scaffolding. No dependency/API deprecation warnings remain in the application build.
 
 Interactive inspection was a smoke test, not a full balance or long-duration playtest. Linux, macOS, WebAssembly, and release-profile builds were not verified. Larger cleanup, persistent progression, complete end-game flows, and circle combo design remain future work.
+
+## Bevy 0.20 migration (2026-11-06)
+
+Branched from `codex/occult-arsenal` (`1d79363`), which contains every other branch's history. Nothing on existing branches was rewritten.
+
+| Dependency | Before | After | Notes |
+| --- | --- | --- | --- |
+| Bevy | 0.19.1 | 0.20.1 | Needs Rust 1.97.1; built with 1.99.1 |
+| bevy_rapier2d | 0.36 | 0.37 | Query predicates and `intersect_shape` callbacks now receive `(Entity, &RapierCollider)` |
+| bevy_prototype_lyon | 0.17 (crates.io) | 0.17 (vendored) | No upstream release supports Bevy 0.20 yet. `vendor/bevy_prototype_lyon` is the unmodified 0.17.0 source with only its Bevy requirement raised to 0.20.1; it compiled without code changes. Switch back to crates.io once 0.18 ships. |
+| bevy_egui (dev-tools) | 0.42 | 0.43 | No code changes |
+
+### Code changes
+
+- **Buttons:** Bevy 0.20 deprecated `Interaction` and the old `Button` marker (the old marker can no longer be spawned). Buttons now spawn `ui_widgets::Button` plus `Hovered` via `ui_button::button()`. Press detection uses `Added<Pressed>` where it used `Changed<Interaction>` + `Pressed`; styling folds `Pressed`/`Hovered` into `ui_button::ButtonInteraction`.
+- **Fast-click safety net:** with the new widgets, a press and release in the same frame (touchpad tap, scripted click) registered the press but left `Pressed` on the button, so it looked held and ignored the next click. `UiButtonPlugin` clears leftover `Pressed` in `Last` while no mouse button or touch is held.
+- **Rapier:** closures for `QueryFilter::predicate` and `intersect_shape` take the extra collider argument.
+
+### Validation
+
+- `cargo clippy --all-targets` (with and without `dev-tools`): no new warnings. The pre-existing `WeaponType::id` dead-code warning without `dev-tools` remains.
+- `cargo test`: 124 passed with `dev-tools`, 109 without (including two new `ui_button` tests).
+- Linux smoke test (Xvfb + llvmpipe): setup screen, hover/hold/click button states, starting a run, Lyon circles and sigils, sprites, HUD, and player movement rendered correctly. A Windows playtest was not done.

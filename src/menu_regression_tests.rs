@@ -39,7 +39,7 @@ fn menu_navigation_preserves_visual_order_and_ignores_unrelated_buttons() {
     let unrelated = app
         .world_mut()
         .spawn((
-            Button,
+            crate::ui_button::button(),
             MenuItem { selected: false },
             MenuActionComponent {
                 action: MenuAction::QuitGame,
@@ -91,7 +91,7 @@ fn mouse_click_wins_over_simultaneous_keyboard_upgrade_selection() {
         });
     app.world_mut()
         .entity_mut(heal)
-        .insert(Interaction::Pressed);
+        .insert(crate::ui_button::Pressed);
     key(&mut app, KeyCode::Enter);
     step(&mut app, 4);
     assert_eq!(state(&app), GameState::Playing);

@@ -48,7 +48,7 @@ pub fn damage_shape(
             Group::GROUP_3,
             Group::GROUP_2 | BREAKABLE_GROUP,
         )),
-        |entity| {
+        |entity, _| {
             if targets.contains(entity) {
                 hits.push(entity);
             }

@@ -176,7 +176,7 @@ pub fn resolve_projectiles(
         loop {
             // CCD is enabled on the physical body, and this Rapier shape cast
             // additionally covers sensor crossings. No hand-written hit geometry.
-            let include = |other| {
+            let include = |other, _: &_| {
                 !projectile.hit_entities.contains(&other)
                     && (targets.contains(other)
                         || collider_groups
@@ -306,7 +306,7 @@ fn burst(
             Group::GROUP_3,
             Group::GROUP_2 | BREAKABLE_GROUP,
         )),
-        |target| {
+        |target, _| {
             if targets.contains(target) {
                 hits.push(target);
             }

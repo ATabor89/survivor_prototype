@@ -324,7 +324,7 @@ fn resolve_hostile_projectiles(
         // Clamp the last sweep to the bolt's remaining life, even on a long frame.
         let fraction = (projectile.remaining / time.delta_secs().max(f32::EPSILON)).min(1.0);
         let movement = (current - previous) * fraction;
-        let include = |other| {
+        let include = |other, _: &_| {
             players.contains(other)
                 || groups
                     .get(other)

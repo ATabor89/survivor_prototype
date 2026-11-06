@@ -232,7 +232,7 @@ fn exporting_again_replaces_the_previous_recipe_atomically() {
 fn click_setup_button(app: &mut App, label: &str) {
     let button = app
         .world_mut()
-        .query_filtered::<(Entity, &Children), With<Button>>()
+        .query_filtered::<(Entity, &Children), With<crate::ui_button::Button>>()
         .iter(app.world())
         .find(|(_, children)| {
             children.iter().any(|child| {
@@ -245,10 +245,10 @@ fn click_setup_button(app: &mut App, label: &str) {
         .expect("setup button exists");
     app.world_mut()
         .entity_mut(button)
-        .insert(Interaction::Pressed);
+        .insert(crate::ui_button::Pressed);
     step(app, 1);
     if let Ok(mut button) = app.world_mut().get_entity_mut(button) {
-        button.insert(Interaction::None);
+        button.remove::<crate::ui_button::Pressed>();
     }
 }
 

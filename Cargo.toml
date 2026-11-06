@@ -2,20 +2,22 @@
 name = "survivors_prototype"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.95"
+rust-version = "1.97.1"
 
 [features]
 dev-tools = ["dep:bevy_egui"]
 
 [dependencies]
-bevy = { version = "0.19.1", default-features = false, features = ["2d", "ui", "bevy_audio", "vorbis"] }
-bevy_rapier2d = { version = "0.36", features = ["debug-render-2d"] }
-bevy_prototype_lyon = "0.17"
+bevy = { version = "0.20.1", default-features = false, features = ["2d", "ui", "bevy_audio", "vorbis"] }
+bevy_rapier2d = { version = "0.37", features = ["debug-render-2d"] }
+# Vendored copy of bevy_prototype_lyon 0.17.0 ported to Bevy 0.20; no upstream
+# release supports Bevy 0.20 yet. Switch back to the crates.io release when one does.
+bevy_prototype_lyon = { path = "vendor/bevy_prototype_lyon" }
 rand = "0.10.2"
 strum = { version = "0.28", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 ron = "0.12.2"
-bevy_egui = { version = "0.42", optional = true, default-features = false, features = ["render", "default_fonts", "bevy_ui"] }
+bevy_egui = { version = "0.43", optional = true, default-features = false, features = ["render", "default_fonts", "bevy_ui"] }
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

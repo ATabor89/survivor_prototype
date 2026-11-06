@@ -350,11 +350,13 @@ fn debug_widget_input_does_not_activate_the_upgrade_menu_behind_it() {
     }
     app.world_mut()
         .entity_mut(button)
-        .insert(Interaction::Pressed);
+        .insert(crate::ui_button::Pressed);
     key(&mut app, KeyCode::Enter);
     step(&mut app, 3);
     assert_eq!(state(&app), GameState::LevelUp);
-    app.world_mut().entity_mut(button).insert(Interaction::None);
+    app.world_mut()
+        .entity_mut(button)
+        .remove::<crate::ui_button::Pressed>();
     {
         let mut debug = app.world_mut().resource_mut::<DebugSession>();
         debug.wants_keyboard_input = false;

@@ -302,8 +302,9 @@ fn advance_rituals(
                     let to = origin + Vec2::from_angle(age * 2.5 + phase) * 105.0;
                     // Rapier sweeps cover movement between frames, including player motion.
                     loop {
-                        let include =
-                            |target| targets.contains(target) && !contacts.contains_key(&target);
+                        let include = |target, _: &_| {
+                            targets.contains(target) && !contacts.contains_key(&target)
+                        };
                         let Some((target, _)) = context.cast_shape(
                             from,
                             0.0,

@@ -9,6 +9,7 @@ use crate::menu::{GenericUpgradeConfirmedEvent, WeaponUpgradeConfirmedEvent};
 use crate::resources::{GameState, GameStats};
 use crate::run::RunEntity;
 use crate::setup::RunRng;
+use crate::ui_button::{button, Pressed};
 use crate::upgrade::{GenericUpgrade, UpgradeType};
 use crate::weapons::magick_circle::PatternType;
 use crate::weapons::weapon_upgrade::{WeaponUpgradeChange, WeaponUpgradeConfig};
@@ -276,7 +277,7 @@ fn replenish_props(
                     Group::GROUP_1 | Group::GROUP_3,
                     WORLD_GROUP | BREAKABLE_GROUP,
                 )),
-                |_| {
+                |_, _| {
                     occupied = true;
                     false
                 },
@@ -607,7 +608,7 @@ fn spawn_treasure_overlay(mut commands: Commands, pending: Res<PendingTreasure>)
                     panel
                         .spawn((
                             TreasureButton,
-                            Button,
+                            button(),
                             Node {
                                 padding: UiRect::axes(px(20), px(14)),
                                 justify_content: JustifyContent::Center,
@@ -645,7 +646,7 @@ fn treasure_input(
     mut pending: ResMut<PendingTreasure>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
-    button: Query<&Interaction, (With<TreasureButton>, Changed<Interaction>)>,
+    button: Query<(), (With<TreasureButton>, Added<Pressed>)>,
     mut upgrades: MessageWriter<WeaponUpgradeConfirmedEvent>,
     mut next: ResMut<NextState<GameState>>,
     players: Query<Entity, With<Player>>,
@@ -667,10 +668,7 @@ fn treasure_input(
             || gamepads
                 .iter()
                 .any(|pad| pad.just_pressed(GamepadButton::South))))
-        || (pointer_allowed
-            && button
-                .iter()
-                .any(|interaction| *interaction == Interaction::Pressed));
+        || (pointer_allowed && !button.is_empty());
     if !activate {
         return;
     }
