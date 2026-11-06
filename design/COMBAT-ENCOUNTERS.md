@@ -51,6 +51,13 @@ Eight short Kenney CC0 cues use Bevy audio: impact, defeat, player damage, upgra
 
 The Debug Run tab can spawn any authored enemy, start the map's final boss encounter, or explicitly bypass the objective with Test Victory. Starting a finale while debug-paused waits for simulation resume. Clear Arena preserves the required final boss. These separate controls let encounter testing use the real objective path while result-screen testing remains quick.
 
+## Deferred enemy concepts
+
+[Chronophage](CHRONOPHAGE.md): a rare, recognizable enemy whose damaging hits
+advance the run clock, skipping reward bosses and preparation time while updating
+the active wave. Concept only; availability, tuning, and finale behavior remain
+open. No implementation is scheduled.
+
 ## Next weapon design questions
 
 The next additions should expand coverage patterns and tradeoffs before filling out names. Candidates for a focused design discussion:
