@@ -236,7 +236,7 @@ fn sweep(
 ) -> Option<Vec2> {
     let shape = Collider::ball(radius.max(1.0));
     loop {
-        let include = |entity| {
+        let include = |entity, _: &_| {
             !hits.contains(&entity)
                 && (targets.get(entity).is_ok_and(|health| health.current > 0)
                     || groups
@@ -360,7 +360,7 @@ fn overlap_targets(
             Group::GROUP_3,
             Group::GROUP_2 | BREAKABLE_GROUP,
         )),
-        |entity| {
+        |entity, _| {
             if targets.get(entity).is_ok_and(|health| health.current > 0) {
                 hits.push(entity);
             }
@@ -522,7 +522,7 @@ fn move_familiars(
             },
             QueryFilter::default()
                 .groups(CollisionGroups::new(Group::GROUP_3, WORLD_GROUP))
-                .predicate(&|other| {
+                .predicate(&|other, _: &_| {
                     groups
                         .get(other)
                         .is_ok_and(|group| group.memberships.intersects(WORLD_GROUP))

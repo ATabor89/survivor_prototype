@@ -148,7 +148,7 @@ pub fn position_is_free(
         ));
     filter.exclude_collider = exclude;
     let mut occupied = false;
-    context.intersect_shape(position, 0.0, collider.raw.as_ref(), filter, |_| {
+    context.intersect_shape(position, 0.0, collider.raw.as_ref(), filter, |_, _| {
         occupied = true;
         false
     });

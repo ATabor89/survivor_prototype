@@ -1,4 +1,5 @@
 //! Small shared sound controls on setup, pause, and result screens.
+use crate::ui_button::{button, Pressed};
 use crate::{game_audio::AudioSettings, resources::GameState};
 use bevy::prelude::*;
 
@@ -52,7 +53,7 @@ fn spawn_controls(mut commands: Commands) {
                 ("+", SoundAction::Louder),
             ] {
                 row.spawn((
-                    Button,
+                    button(),
                     action,
                     Node {
                         padding: UiRect::axes(Val::Px(10.0), Val::Px(7.0)),
@@ -73,17 +74,14 @@ fn spawn_controls(mut commands: Commands) {
 
 fn sound_input(
     mut settings: ResMut<AudioSettings>,
-    buttons: Query<(&SoundAction, &Interaction), Changed<Interaction>>,
+    buttons: Query<&SoundAction, Added<Pressed>>,
     #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
 ) {
     #[cfg(feature = "dev-tools")]
     if debug.blocks_pointer() {
         return;
     }
-    for (action, interaction) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for action in &buttons {
         match action {
             SoundAction::Toggle => settings.muted = !settings.muted,
             SoundAction::Quieter => settings.volume = (settings.volume - 0.1).max(0.0),

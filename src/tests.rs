@@ -907,7 +907,7 @@ fn mouse_upgrade_and_healing_survive_the_return_to_playing() {
     );
     app.world_mut()
         .entity_mut(weapon_button)
-        .insert(Interaction::Pressed);
+        .insert(crate::ui_button::Pressed);
     step(&mut app, 4);
     assert_eq!(state(&app), GameState::Playing);
     assert_eq!(
@@ -946,7 +946,7 @@ fn mouse_upgrade_and_healing_survive_the_return_to_playing() {
     }
     app.world_mut()
         .entity_mut(heal_button)
-        .insert(Interaction::Pressed);
+        .insert(crate::ui_button::Pressed);
     step(&mut app, 4);
     assert_eq!(state(&app), GameState::Playing);
     assert_eq!(app.world().get::<Health>(player).unwrap().current, 100);

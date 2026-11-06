@@ -9,6 +9,7 @@ use crate::weapons::weapon_upgrade::{WeaponUpgradeConfig, WeaponUpgradeSpec};
 use crate::weapons::{WeaponMeta, WeaponType};
 use bevy::color::{Alpha, Color};
 
+use crate::ui_button::button;
 use bevy::log::info;
 use bevy::prelude::*;
 use rand::prelude::*;
@@ -182,7 +183,7 @@ pub fn spawn_upgrade_choice(
 
     parent
         .spawn((
-            Button,
+            button(),
             BorderColor::all(menu::get_rarity_color(&choice.rarity).with_alpha(0.5)),
             BackgroundColor(if is_first {
                 Color::srgb(0.3, 0.3, 0.4)

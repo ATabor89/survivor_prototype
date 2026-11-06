@@ -1,4 +1,5 @@
 //! Versioned run recipes and separate seeded streams; physics is not a replay format.
+use crate::ui_button::{button, ButtonInteraction, ButtonStateQuery, Pressed};
 use crate::{
     components::Player,
     content::{ActiveStage, GameContent},
@@ -400,7 +401,7 @@ fn spawn_setup(
 fn setup_button(parent: &mut ChildSpawnerCommands, label: &str, action: SetupAction) {
     parent
         .spawn((
-            Button,
+            button(),
             action,
             Node {
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
@@ -429,11 +430,10 @@ fn setup_input(world: &mut World) {
         None
     } else {
         world
-            .query_filtered::<(&Interaction, &SetupAction), Changed<Interaction>>()
+            .query_filtered::<&SetupAction, Added<Pressed>>()
             .iter(world)
-            .find_map(|(interaction, action)| {
-                (*interaction == Interaction::Pressed).then_some(*action)
-            })
+            .next()
+            .copied()
     };
     let keys = world.resource::<ButtonInput<KeyCode>>().clone();
     let (pad_next, pad_previous, pad_activate) = {
@@ -683,14 +683,15 @@ fn update_setup_summary(
 
 fn update_setup_buttons(
     status: Res<SetupStatus>,
-    mut buttons: Query<(&SetupAction, &Interaction, &mut BackgroundColor)>,
+    mut buttons: Query<(&SetupAction, ButtonStateQuery, &mut BackgroundColor)>,
 ) {
-    for (action, interaction, mut color) in &mut buttons {
-        color.0 = if *interaction == Interaction::Pressed {
+    for (action, (pressed, hovered), mut color) in &mut buttons {
+        let interaction = ButtonInteraction::new(pressed, hovered);
+        color.0 = if interaction == ButtonInteraction::Pressed {
             Color::srgb(0.42, 0.38, 0.22)
         } else if status.selected == Some(*action) {
             Color::srgb(0.33, 0.31, 0.2)
-        } else if *interaction == Interaction::Hovered {
+        } else if interaction == ButtonInteraction::Hovered {
             Color::srgb(0.25, 0.3, 0.34)
         } else {
             Color::srgb(0.17, 0.21, 0.24)

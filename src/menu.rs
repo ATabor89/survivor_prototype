@@ -2,6 +2,7 @@ use crate::components::{Luck, Player};
 use crate::inventory::{PassiveCatalog, PassiveInventory, PassiveUpgradeEvent};
 use crate::resources::{GameState, GameStats};
 use crate::types::Rarity;
+use crate::ui_button::{button, Button, ButtonInteraction, ButtonStateQuery, Pressed};
 use crate::upgrade;
 use crate::upgrade::{GenericUpgrade, UpgradePool, UpgradeType};
 use crate::weapons::magick_circle::PatternType;
@@ -307,7 +308,7 @@ type MenuButtons<'w, 's> = Query<
     (
         &'static mut MenuItem,
         &'static MenuActionComponent,
-        &'static Interaction,
+        Has<Pressed>,
     ),
     With<Button>,
 >;
@@ -343,11 +344,7 @@ fn collect_menu_activation(
     let pressed_buttons: HashSet<_> = items
         .iter()
         .copied()
-        .filter(|entity| {
-            buttons
-                .get(*entity)
-                .is_ok_and(|(_, _, interaction)| *interaction == Interaction::Pressed)
-        })
+        .filter(|entity| buttons.get(*entity).is_ok_and(|(_, _, pressed)| pressed))
         .collect();
     // A new root never consumes the input that opened it. Track held mouse
     // buttons too, so a held click cannot select an item on a replacement menu.
@@ -524,7 +521,7 @@ fn spawn_compact_button(
 ) {
     parent
         .spawn((
-            Button,
+            button(),
             Node {
                 width: Val::Px(140.0),
                 height: Val::Px(38.0),
@@ -621,7 +618,7 @@ pub fn spawn_pattern_button(
 ) {
     parent
         .spawn((
-            Button,
+            button(),
             Node {
                 width: Val::Px(500.0),
                 padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
@@ -687,21 +684,22 @@ pub fn cleanup_menu_state(mut commands: Commands, query: Query<Entity, With<Menu
 }
 
 pub fn update_menu_buttons(
-    mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, &Interaction)>,
+    mut buttons: Query<(&MenuItem, &mut BackgroundColor, &Children, ButtonStateQuery)>,
     mut text_query: Query<&mut TextColor>,
 ) {
-    for (menu_item, mut background_color, children, interaction) in buttons.iter_mut() {
+    for (menu_item, mut background_color, children, (pressed, hovered)) in buttons.iter_mut() {
+        let interaction = ButtonInteraction::new(pressed, hovered);
         // Enhanced visual feedback
-        let bg_color = match (*interaction, menu_item.selected) {
-            (Interaction::Pressed, _) => Color::srgb(0.2, 0.2, 0.2),
-            (Interaction::Hovered, _) => Color::srgb(0.4, 0.4, 0.4),
-            (Interaction::None, true) => Color::srgb(0.35, 0.35, 0.4),
-            (Interaction::None, false) => Color::srgb(0.3, 0.3, 0.3),
+        let bg_color = match (interaction, menu_item.selected) {
+            (ButtonInteraction::Pressed, _) => Color::srgb(0.2, 0.2, 0.2),
+            (ButtonInteraction::Hovered, _) => Color::srgb(0.4, 0.4, 0.4),
+            (ButtonInteraction::None, true) => Color::srgb(0.35, 0.35, 0.4),
+            (ButtonInteraction::None, false) => Color::srgb(0.3, 0.3, 0.3),
         };
         background_color.0 = bg_color;
 
         // Update text color for all text children
-        let is_highlighted = menu_item.selected || matches!(interaction, Interaction::Hovered);
+        let is_highlighted = menu_item.selected || interaction == ButtonInteraction::Hovered;
         for (i, child) in children.iter().enumerate() {
             if let Ok(mut text_color) = text_query.get_mut(child) {
                 text_color.0 = if is_highlighted {
