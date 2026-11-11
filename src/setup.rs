@@ -183,8 +183,15 @@ pub(crate) fn write_configuration_to(
     crate::storage::write_ron(config, path)
 }
 
+/// Start a run from the recipe staged on the setup screen.
 pub fn start_configured_run(world: &mut World) -> Result<(), String> {
     let config = world.resource::<RunConfiguration>().clone();
+    start_run(world, config)
+}
+
+/// Validate `config` and begin a fresh run with it. The staged setup recipe is
+/// left alone, so the estate can launch expeditions without disturbing it.
+pub fn start_run(world: &mut World, config: RunConfiguration) -> Result<(), String> {
     validate_configuration(world, &config)?;
     let index = world
         .resource::<GameContent>()
@@ -291,6 +298,7 @@ enum SetupAction {
     Import,
     Export,
     Start,
+    Estate,
     Quit,
 }
 
@@ -310,7 +318,8 @@ impl SetupAction {
             Self::Import => stage_count + weapon_count + 2,
             Self::Export => stage_count + weapon_count + 3,
             Self::Start => stage_count + weapon_count + 4,
-            Self::Quit => stage_count + weapon_count + 5,
+            Self::Estate => stage_count + weapon_count + 5,
+            Self::Quit => stage_count + weapon_count + 6,
         }
     }
 }
@@ -371,7 +380,9 @@ fn spawn_setup(
             let instructions = format!("{instructions}\nF1: context-aware debug tools.");
             panel.spawn((Text::new(instructions),TextFont{font_size:FontSize::Px(15.0),..default()}));
             panel.spawn(Node{flex_direction:FlexDirection::Row,column_gap:Val::Px(12.0),..default()}).with_children(|row| {
-                setup_button(row,"Begin expedition  [Enter]",SetupAction::Start); setup_button(row,"Quit",SetupAction::Quit);
+                setup_button(row,"Begin expedition  [Enter]",SetupAction::Start);
+                setup_button(row,"Enter the estate",SetupAction::Estate);
+                setup_button(row,"Quit",SetupAction::Quit);
             });
         });
     });
@@ -527,7 +538,17 @@ fn setup_input(world: &mut World) {
             result
         }
         SetupAction::Export => export_configuration(world),
-        SetupAction::Start => start_configured_run(world),
+        SetupAction::Start => {
+            *world.resource_mut::<crate::expedition::RunOrigin>() =
+                crate::expedition::RunOrigin::Sandbox;
+            start_configured_run(world)
+        }
+        SetupAction::Estate => {
+            world
+                .resource_mut::<NextState<GameState>>()
+                .set(GameState::Estate);
+            Ok(())
+        }
         SetupAction::Quit => {
             world
                 .resource_mut::<NextState<GameState>>()
@@ -610,21 +631,7 @@ fn update_setup_summary(
     let stage_name = stage.map_or("Unknown stage", |s| s.name.as_str());
     let objective = stage.map_or_else(
         || "Unknown objective".into(),
-        |stage| {
-            let minutes = stage.duration as u32 / 60;
-            let seconds = stage.duration as u32 % 60;
-            match &stage.win_condition {
-                crate::content::StageWinCondition::TimedSurvival => {
-                    format!("Survive {minutes}:{seconds:02}")
-                }
-                crate::content::StageWinCondition::DefeatBoss { enemy } => format!(
-                    "At {minutes}:{seconds:02}, defeat {} to win",
-                    content
-                        .enemy(enemy)
-                        .map_or(enemy.as_str(), |enemy| enemy.name.as_str())
-                ),
-            }
-        },
+        |stage| stage.objective(&content),
     );
     let weapons = config
         .weapons

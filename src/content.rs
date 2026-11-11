@@ -1,7 +1,10 @@
 //! Validated, authored game data shared by stages, enemies, waves, and loot.
 use bevy::prelude::*;
 use serde::Deserialize;
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 pub const EMBEDDED_CONTENT: &str = include_str!("../assets/data/stages.ron");
 
@@ -291,23 +294,13 @@ impl GameContent {
     /// An explicitly configured asset root is authoritative: mistakes there
     /// produce an actionable error rather than silently using different data.
     pub fn load() -> Result<Self, String> {
-        if let Some(root) = std::env::var_os("BEVY_ASSET_ROOT") {
-            return Self::load_from_path(Path::new(&root).join("assets/data/stages.ron"));
-        }
-        if let Ok(executable) = std::env::current_exe() {
-            if let Some(directory) = executable.parent() {
-                let path = directory.join("assets/data/stages.ron");
-                if path.exists() {
-                    return Self::load_from_path(path);
-                }
+        match data_file("stages.ron") {
+            Some(path) => Self::load_from_path(path),
+            None => {
+                warn!("assets/data/stages.ron was not found; using the bundled stage definitions");
+                Self::parse(EMBEDDED_CONTENT)
             }
         }
-        let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/data/stages.ron");
-        if source_path.exists() {
-            return Self::load_from_path(source_path);
-        }
-        warn!("assets/data/stages.ron was not found; using the bundled stage definitions");
-        Self::parse(EMBEDDED_CONTENT)
     }
 
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -517,7 +510,42 @@ impl GameContent {
     }
 }
 
+/// Where to read `assets/data/<name>` from, or `None` to use bundled data.
+///
+/// `BEVY_ASSET_ROOT` is authoritative when set, even if the file is missing,
+/// so a mistake there is reported instead of silently loading other data.
+/// Otherwise the file beside the executable wins over the source checkout.
+pub fn data_file(name: &str) -> Option<PathBuf> {
+    let relative = Path::new("assets/data").join(name);
+    if let Some(root) = std::env::var_os("BEVY_ASSET_ROOT") {
+        return Some(Path::new(&root).join(relative));
+    }
+    let deployed = std::env::current_exe()
+        .ok()
+        .and_then(|executable| executable.parent().map(|dir| dir.join(&relative)));
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(&relative);
+    deployed
+        .into_iter()
+        .chain([source])
+        .find(|path| path.exists())
+}
+
 impl StageDefinition {
+    /// One line describing how the stage is won, e.g. `Survive 9:00`.
+    pub fn objective(&self, content: &GameContent) -> String {
+        let minutes = self.duration as u32 / 60;
+        let seconds = self.duration as u32 % 60;
+        match &self.win_condition {
+            StageWinCondition::TimedSurvival => format!("Survive {minutes}:{seconds:02}"),
+            StageWinCondition::DefeatBoss { enemy } => format!(
+                "At {minutes}:{seconds:02}, defeat {} to win",
+                content
+                    .enemy(enemy)
+                    .map_or(enemy.as_str(), |enemy| enemy.name.as_str())
+            ),
+        }
+    }
+
     fn contains(&self, point: [f32; 2]) -> bool {
         (0..2)
             .all(|axis| point[axis].is_finite() && point[axis].abs() < self.half_size[axis] - 24.0)

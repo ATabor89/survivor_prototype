@@ -5,6 +5,8 @@ pub enum GameState {
     #[default]
     MainMenu,
     Settings,
+    /// The peaceful hub between expeditions; see `crate::estate`.
+    Estate,
     Playing,
     LevelUp,
     Treasure,

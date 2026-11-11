@@ -71,40 +71,52 @@ pub fn gameplay_movement_system(
         return;
     }
 
+    #[cfg(feature = "dev-tools")]
+    let keyboard_enabled = !(debug.open && debug.wants_keyboard_input);
+    #[cfg(not(feature = "dev-tools"))]
+    let keyboard_enabled = true;
+    let direction = movement_input(&keyboard, &gamepads, keyboard_enabled);
+
     for (player, mut controller, facing) in query.iter_mut() {
-        let mut direction = Vec2::ZERO;
-        #[cfg(feature = "dev-tools")]
-        let keyboard_enabled = !(debug.open && debug.wants_keyboard_input);
-        #[cfg(not(feature = "dev-tools"))]
-        let keyboard_enabled = true;
-
-        if keyboard_enabled && keyboard.pressed(KeyCode::KeyW) {
-            direction.y += 1.0;
-        }
-        if keyboard_enabled && keyboard.pressed(KeyCode::KeyS) {
-            direction.y -= 1.0;
-        }
-        if keyboard_enabled && keyboard.pressed(KeyCode::KeyA) {
-            direction.x -= 1.0;
-        }
-        if keyboard_enabled && keyboard.pressed(KeyCode::KeyD) {
-            direction.x += 1.0;
-        }
-
-        for gamepad in &gamepads {
-            let stick = gamepad.left_stick();
-            if stick.length_squared() > 0.04 {
-                direction += stick;
-            }
-        }
         if let Some(mut facing) = facing {
             if direction.length_squared() > 0.0001 {
                 facing.0 = direction.normalize();
             }
         }
-        controller.translation =
-            Some(direction.clamp_length_max(1.0) * player.speed * time.delta_secs());
+        controller.translation = Some(direction * player.speed * time.delta_secs());
     }
+}
+
+/// WASD plus every connected left stick, capped at full speed.
+///
+/// Expeditions and the estate share this so walking feels the same in both.
+pub fn movement_input(
+    keyboard: &ButtonInput<KeyCode>,
+    gamepads: &Query<&Gamepad>,
+    keyboard_enabled: bool,
+) -> Vec2 {
+    let mut direction = Vec2::ZERO;
+    if keyboard_enabled {
+        if keyboard.pressed(KeyCode::KeyW) {
+            direction.y += 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyS) {
+            direction.y -= 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyA) {
+            direction.x -= 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyD) {
+            direction.x += 1.0;
+        }
+    }
+    for gamepad in gamepads {
+        let stick = gamepad.left_stick();
+        if stick.length_squared() > 0.04 {
+            direction += stick;
+        }
+    }
+    direction.clamp_length_max(1.0)
 }
 
 pub fn universal_input_system(
@@ -145,7 +157,8 @@ pub fn handle_pause_state(
                 rapier_config.physics_pipeline_active = false;
                 time.pause();
             }
-            GameState::Playing => {
+            // The estate avatar walks with the same Rapier character controller.
+            GameState::Playing | GameState::Estate => {
                 // Resume physics and time
                 rapier_config.physics_pipeline_active = true;
                 time.unpause();

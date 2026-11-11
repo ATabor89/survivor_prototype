@@ -142,7 +142,8 @@ fn each_estate_run_banks_separately_and_restart_clears_the_report() {
     kill_player(&mut app);
     assert_eq!(app.world().resource::<Profile>().stockpile.essence, 3);
 
-    key(&mut app, KeyCode::Enter); // Play again
+    key(&mut app, KeyCode::ArrowDown); // Return to estate -> Depart again
+    key(&mut app, KeyCode::Enter);
     step(&mut app, 4);
     assert_eq!(state(&app), GameState::Playing);
     assert!(app.world().resource::<LastExpedition>().0.is_none());

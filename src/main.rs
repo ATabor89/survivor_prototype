@@ -10,6 +10,7 @@ mod death;
 #[cfg(feature = "dev-tools")]
 mod dev_tools;
 mod enemy_behavior;
+mod estate;
 mod events;
 mod expedition;
 mod experience;
@@ -134,7 +135,11 @@ impl Plugin for SurvivorsGamePlugin {
                 setup::SetupPlugin,
                 art::ArtPlugin,
             ))
-            .add_plugins((profile::ProfilePlugin, expedition::ExpeditionPlugin))
+            .add_plugins((
+                profile::ProfilePlugin,
+                expedition::ExpeditionPlugin,
+                estate::EstatePlugin,
+            ))
             // Startup systems
             .add_systems(
                 Startup,
