@@ -18,16 +18,17 @@ env:
 jobs:
   check:
     name: Format, Clippy, and tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Windows is the game's development and target platform, and Bevy needs no
+    # extra system packages there. Linux runners need ALSA and udev headers
+    # from apt, which made the job depend on the Ubuntu mirrors being reachable.
+    runs-on: windows-latest
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      # Check out the files byte-for-byte as committed.
+      - name: Keep repository line endings
+        run: git config --global core.autocrlf false
 
-      # Bevy's audio and gamepad backends link against ALSA and udev on Linux.
-      - name: Install system libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libasound2-dev libudev-dev
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
