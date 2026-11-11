@@ -22,6 +22,7 @@ pub struct GameStats {
     pub enemies_killed: u32,
     pub time_elapsed: f32,
     pub gold: u32,
+    pub bosses_defeated: u32,
 }
 
 #[derive(Resource)]

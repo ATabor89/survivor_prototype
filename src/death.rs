@@ -21,7 +21,12 @@ pub fn death_system(
         (With<Player>, Without<MarkedForDespawn>),
     >,
     marked_entities: Query<
-        (Entity, Option<&Transform>, Option<&Enemy>),
+        (
+            Entity,
+            Option<&Transform>,
+            Option<&Enemy>,
+            Has<crate::waves::Boss>,
+        ),
         (With<MarkedForDeath>, Without<MarkedForDespawn>),
     >,
     mut death_events: MessageWriter<EntityDeathEvent>,
@@ -44,12 +49,15 @@ pub fn death_system(
     }
 
     // Handle marked entities
-    for (entity, transform, enemy) in marked_entities.iter() {
+    for (entity, transform, enemy, is_boss) in marked_entities.iter() {
         if Some(entity) == dead_player {
             continue;
         }
         if enemy.is_some() {
             game_stats.enemies_killed += 1;
+            if is_boss {
+                game_stats.bosses_defeated += 1;
+            }
         }
 
         // Send death event before despawning
