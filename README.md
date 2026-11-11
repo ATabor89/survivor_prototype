@@ -144,15 +144,11 @@ encounters, loot/treasure, debug pause/live behavior, and run endings/restarts.
 Rendering and layout also need a visual check after engine or UI changes. See
 the stage-content document for final integrated validation and remaining limits.
 
-## Migration checkpoints
+## Project history
 
-The dependency upgrade is merged into `magick_circle_pattern_select`, the baseline
-for further work. Migration checkpoints remain on `codex/dependency-upgrade`. The original uncommitted
-source/design work is preserved in commit `8e81ab2`. A byte-verified local ZIP of
-the pre-migration files, including editor metadata and the untracked `nul` file,
-is stored at `.restart-backups/before-dependency-upgrade.zip` and ignored by Git.
-It is outside `target/` so `cargo clean` does not remove it.
+`main` is the development baseline. The [design index](design/README.md) says which
+documents describe the current game and which are historical records, including
+[the dependency migration record](design/DEPENDENCY-UPGRADE.md).
 
-See [the migration record](design/DEPENDENCY-UPGRADE.md) for versions, checkpoints,
-validation, and remaining cleanup. The legacy `src/weapon.rs` is preserved but is
-not part of the active Rust module tree.
+Every push and pull request runs formatting, strict Clippy, and both test
+configurations in [GitHub Actions](.github/workflows/ci.yml).

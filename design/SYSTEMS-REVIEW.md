@@ -28,10 +28,8 @@ Damage and area upgrades remain percentage-based. Small damage increases can sti
 round down to the same integer hit value; changing that progression is a balance
 decision rather than an incidental refactor.
 
-The inactive `src/weapon.rs` is still preserved as historical checkpoint material.
-It is not declared in the Rust module tree and does not run alongside `src/weapons/`.
-The original source/design checkpoint and `.restart-backups` archive remain
-documented in [the migration record](DEPENDENCY-UPGRADE.md).
+The inactive legacy `src/weapon.rs` mentioned in earlier records was removed in
+November 2026; it remains in Git history (last present at `3381844`).
 
 ## Map and run structure
 
@@ -132,5 +130,3 @@ and restart cleanup. They are regression checks, not evidence of game balance.
   and Windows smoke tests do not establish Linux/macOS/wasm support or performance
   at substantially larger enemy counts.
 - Character art remains provisional; enemy variants currently share an atlas cell.
-  The preserved legacy weapon file can be archived or removed in a later cleanup
-  once its historical value is no longer needed.

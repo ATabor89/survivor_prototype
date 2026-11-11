@@ -5,8 +5,8 @@
 > The older sections preserve the original design history; their status table is historical.
 
 > **Implementation summary updated:** 2026-09-09 (survival-run baseline; game design remains provisional)
-> **Branch:** `codex/survival-run`
-> **Engine:** Bevy 0.19.1 (Rust 1.95+, tested with 1.96)
+> **Engine at the time of that snapshot:** Bevy 0.19.1. The project now uses Bevy 0.20;
+> `Cargo.toml` and the [design index](README.md) are authoritative.
 
 **Current implementation:** Read [the systems review](SYSTEMS-REVIEW.md) for the
 map, waves, run lifecycle, refactors, and validation, and [circle composition](CIRCLE-COMPOSITION.md)
