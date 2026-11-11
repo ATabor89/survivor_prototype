@@ -1,4 +1,5 @@
 /target
+/.idea
 /.restart-backups
 /run-config.ron
 /save.ron
