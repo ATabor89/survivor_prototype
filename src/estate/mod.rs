@@ -12,6 +12,7 @@ mod expedition_table;
 mod hud;
 mod interaction;
 mod ui;
+mod workshop;
 mod world;
 
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub enum EstateScreen {
     Roaming,
     Dialogue,
     ExpeditionTable,
+    Workshop,
 }
 
 /// Choices offered by estate menus, carried by `MenuAction::Estate`.
@@ -40,6 +42,8 @@ pub enum EstateAction {
     SelectStage(usize),
     SelectWeapon(WeaponType),
     Depart,
+    /// Build the upgrade at this index in the estate content.
+    Build(usize),
     Close,
 }
 
@@ -54,6 +58,7 @@ impl Plugin for EstatePlugin {
                 interaction::plugin,
                 dialogue::plugin,
                 expedition_table::plugin,
+                workshop::plugin,
                 hud::plugin,
             ))
             .add_systems(
@@ -82,7 +87,7 @@ fn step_back(
     }
     match screen.get() {
         EstateScreen::Roaming => next_state.set(GameState::MainMenu),
-        EstateScreen::Dialogue | EstateScreen::ExpeditionTable => {
+        EstateScreen::Dialogue | EstateScreen::ExpeditionTable | EstateScreen::Workshop => {
             next_screen.set(EstateScreen::Roaming);
         }
     }

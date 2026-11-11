@@ -64,6 +64,23 @@ impl Stockpile {
             *slot = slot.saturating_add(other.get(kind));
         }
     }
+
+    pub fn covers(&self, cost: &Self) -> bool {
+        use strum::IntoEnumIterator;
+        ResourceKind::iter().all(|kind| self.get(kind) >= cost.get(kind))
+    }
+
+    /// Pay `cost` in full, or change nothing and report that it is unaffordable.
+    pub fn spend(&mut self, cost: &Self) -> bool {
+        use strum::IntoEnumIterator;
+        if !self.covers(cost) {
+            return false;
+        }
+        for kind in ResourceKind::iter() {
+            *self.slot(kind) -= cost.get(kind);
+        }
+        true
+    }
 }
 
 impl std::fmt::Display for Stockpile {
@@ -93,6 +110,9 @@ pub struct Profile {
     pub expeditions: u32,
     #[serde(default)]
     pub victories: u32,
+    /// Ids of estate upgrades that have been built; see `estate.ron`.
+    #[serde(default)]
+    pub upgrades: Vec<String>,
 }
 
 impl Default for Profile {
@@ -102,11 +122,16 @@ impl Default for Profile {
             stockpile: Stockpile::default(),
             expeditions: 0,
             victories: 0,
+            upgrades: Vec::new(),
         }
     }
 }
 
 impl Profile {
+    pub fn owns(&self, upgrade: &str) -> bool {
+        self.upgrades.iter().any(|owned| owned == upgrade)
+    }
+
     pub fn parse(text: &str) -> Result<Self, String> {
         let profile: Self = ron::from_str(text).map_err(|error| error.to_string())?;
         if profile.version != PROFILE_VERSION {
@@ -212,6 +237,15 @@ mod tests {
     }
 
     #[test]
+    fn spending_is_all_or_nothing() {
+        let mut bank = pile(10, 5, 0);
+        assert!(!bank.spend(&pile(4, 0, 1)));
+        assert_eq!(bank, pile(10, 5, 0));
+        assert!(bank.spend(&pile(4, 5, 0)));
+        assert_eq!(bank, pile(6, 0, 0));
+    }
+
+    #[test]
     fn adding_saturates_instead_of_wrapping() {
         let mut bank = pile(u32::MAX - 1, 0, 0);
         bank.add(&pile(5, 2, 1));
@@ -231,6 +265,7 @@ mod tests {
             stockpile: pile(7, 3, 1),
             expeditions: 4,
             victories: 2,
+            upgrades: vec!["armory".into()],
             ..default()
         };
         crate::storage::write_ron(&profile, &path).unwrap();

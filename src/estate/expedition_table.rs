@@ -5,6 +5,7 @@ use super::{EstateAction, EstateScreen};
 use crate::content::GameContent;
 use crate::expedition::RunOrigin;
 use crate::menu::{MenuAction, MenuActivation};
+use crate::profile::Profile;
 use crate::setup::{RunConfiguration, WeaponLoadout};
 use crate::weapons::WeaponType;
 use bevy::prelude::*;
@@ -27,16 +28,27 @@ impl FromWorld for ExpeditionPlan {
 
 impl ExpeditionPlan {
     /// A fresh level-one run recipe for this plan with a new seed.
-    pub fn recipe(&self, content: &GameContent) -> Option<RunConfiguration> {
+    ///
+    /// Built estate upgrades shape it: the weapon must be one the estate
+    /// offers, and upgrade-granted passives are included.
+    pub fn recipe(
+        &self,
+        stages: &GameContent,
+        estate: &EstateContent,
+        profile: &Profile,
+    ) -> Option<RunConfiguration> {
+        if !estate.available_weapons(profile).contains(&self.weapon) {
+            return None;
+        }
         Some(RunConfiguration {
-            stage: content.stages.get(self.stage)?.id.clone(),
+            stage: stages.stages.get(self.stage)?.id.clone(),
             seed: rand::random(),
             weapons: vec![WeaponLoadout {
                 weapon: self.weapon,
                 level: 1,
                 patterns: vec![],
             }],
-            passives: vec![],
+            passives: estate.starting_passives(profile),
             ..default()
         })
     }
@@ -65,6 +77,7 @@ fn spawn_table(
     mut commands: Commands,
     stages: Res<GameContent>,
     estate: Res<EstateContent>,
+    profile: Res<Profile>,
     mut status: ResMut<TableStatus>,
 ) {
     status.0.clear();
@@ -85,12 +98,12 @@ fn spawn_table(
                 );
             }
             heading(panel, "STARTING WEAPON");
-            for weapon in &estate.expedition_weapons {
+            for weapon in estate.available_weapons(&profile) {
                 choice_row(
                     panel,
                     &weapon.to_string(),
                     weapon.family(),
-                    EstateAction::SelectWeapon(*weapon),
+                    EstateAction::SelectWeapon(weapon),
                     false,
                 );
             }
@@ -122,6 +135,7 @@ fn handle_choices(
             EstateAction::SelectWeapon(weapon) => plan.weapon = weapon,
             EstateAction::Close => next.set(EstateScreen::Roaming),
             EstateAction::Depart => commands.queue(depart),
+            EstateAction::Build(_) => {}
         }
     }
 }
@@ -131,8 +145,12 @@ fn handle_choices(
 fn depart(world: &mut World) {
     let plan = *world.resource::<ExpeditionPlan>();
     let result = plan
-        .recipe(world.resource::<GameContent>())
-        .ok_or_else(|| "That destination no longer exists.".to_owned())
+        .recipe(
+            world.resource::<GameContent>(),
+            world.resource::<EstateContent>(),
+            world.resource::<Profile>(),
+        )
+        .ok_or_else(|| "That destination or weapon is not available.".to_owned())
         .and_then(|recipe| crate::setup::start_run(world, recipe));
     match result {
         Ok(()) => *world.resource_mut::<RunOrigin>() = RunOrigin::Estate,
@@ -146,6 +164,9 @@ fn depart(world: &mut World) {
 fn update_summary(
     plan: Res<ExpeditionPlan>,
     stages: Res<GameContent>,
+    estate: Res<EstateContent>,
+    profile: Res<Profile>,
+    passives: Res<crate::inventory::PassiveCatalog>,
     status: Res<TableStatus>,
     mut summary: Query<&mut Text, With<PlanSummary>>,
 ) {
@@ -154,6 +175,14 @@ fn update_summary(
         .get(plan.stage)
         .map_or("Unknown destination", |stage| stage.name.as_str());
     let mut value = format!("Destination: {stage}\nStarting weapon: {}", plan.weapon);
+    let provisions: Vec<_> = estate
+        .starting_passives(&profile)
+        .iter()
+        .map(|passive| passives.get(passive.kind).name.clone())
+        .collect();
+    if !provisions.is_empty() {
+        value.push_str(&format!("\nEstate provisions: {}", provisions.join(", ")));
+    }
     if !status.0.is_empty() {
         value.push('\n');
         value.push_str(&status.0);
