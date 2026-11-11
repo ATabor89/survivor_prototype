@@ -1,6 +1,24 @@
 # Survivors Prototype
 
 An occult-themed 2D survivors prototype built with Bevy 0.20, Rapier, and Lyon.
+Expeditions are survivors-style runs; between them, a small estate hub banks what
+you bring home and spends it on upgrades that change later expeditions.
+
+## The estate loop
+
+Choose **Enter the estate** on the title screen. Walk with WASD, press **E** next
+to a villager or station to use it, and **Escape** to back out. The **Map room**
+plans and launches an expedition; its result screen returns you to the estate
+with the haul banked. The **Workshop** spends gold, essence, and seals on
+upgrades that unlock starting weapons or equip every expedition with a passive.
+Progress is saved to `save.ron` in the launch directory; delete it to start over.
+
+The rest of the title screen is a sandbox: any weapon, any seed, nothing banked.
+See [the estate guide](design/ESTATE.md) for the loop, resources, and authoring
+`assets/data/estate.ron`.
+
+## Expeditions
+
 Build an inventory of Magick Circles, Inscribed Needles, Alchemical Vessels, and
 passive items while collecting experience, breaking props for supplies, and
 surviving authored enemy phases and boss encounters.
@@ -111,8 +129,7 @@ phases have authored start times, spawn mixes, population targets, and caps.
 Timed encounters announce themselves before spawning; some include a Warden and
 a temporary ring of enemies. Defeating configured bosses drops a reward chest.
 Breakable props can drop healing or gold, and authored pickups provide landmarks
-worth visiting. Gold is recorded for the current run; there is no persistent shop
-or currency progression yet.
+worth visiting. Gold from an estate expedition is banked when the run ends.
 
 Edit [assets/data/stages.ron](assets/data/stages.ron) and relaunch to change stages,
 enemy definitions, encounter schedules, obstacles, pickups, and breakables without
@@ -121,7 +138,7 @@ for authoring details. The [combat encounter guide](design/COMBAT-ENCOUNTERS.md)
 documents map win conditions, enemy attacks, pacing, and combat feedback.
 
 Encounter schedules and XP progression are an initial balance pass. Mid-run
-saves and persistent progression remain future work. The
+saves remain future work. The
 [systems review](design/SYSTEMS-REVIEW.md) records the earlier refactor baseline;
 [the design document](design/DESIGN.md) preserves the larger concept.
 

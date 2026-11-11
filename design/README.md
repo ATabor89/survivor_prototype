@@ -8,6 +8,7 @@ kept as history, so read the status column before trusting implementation detail
 
 | Document | Covers |
 | --- | --- |
+| [ESTATE.md](ESTATE.md) | The estate hub, the expedition loop, saved progress, and authoring `assets/data/estate.ron` |
 | [BUILD-DIVERSITY.md](BUILD-DIVERSITY.md) | Inventory slots, passives, run recipes, seeded streams, debug tools, and the worldbuilding contract |
 | [STAGE-CONTENT.md](STAGE-CONTENT.md) | Authoring stages, phases, encounters, breakables, and treasure in `assets/data/stages.ron` |
 | [COMBAT-ENCOUNTERS.md](COMBAT-ENCOUNTERS.md) | Map win conditions, enemy attack behaviors, pacing, combat feedback, and audio |
