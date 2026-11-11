@@ -1,12 +1,5 @@
 use super::*;
-use bevy::asset::AssetPlugin;
 use bevy::ecs::system::RunSystemOnce;
-use bevy::gizmos::GizmoPlugin;
-use bevy::mesh::MeshPlugin;
-use bevy::scene::ScenePlugin;
-use bevy::state::app::StatesPlugin;
-use bevy::time::TimeUpdateStrategy;
-use bevy::transform::TransformPlugin;
 use bevy_rapier2d::prelude::*;
 use components::{Enemy, Health, Player};
 use experience::{Experience, ExperienceOrb};
@@ -18,28 +11,8 @@ use weapons::{WeaponDamage, WeaponMeta};
 // Run the actual game plugins and Rapier without a window/GPU. Input is supplied
 // directly so each test controls the exact frame in which a key is pressed.
 pub(crate) fn game() -> App {
-    let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        AssetPlugin {
-            file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
-            ..default()
-        },
-        TransformPlugin,
-        StatesPlugin,
-        MeshPlugin,
-        ScenePlugin,
-        GizmoPlugin,
-    ))
-    .init_asset::<Image>()
-    .init_asset::<TextureAtlasLayout>()
-    .init_resource::<ButtonInput<KeyCode>>()
-    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-        1.0 / 60.0,
-    )))
-    .add_plugins(SurvivorsGamePlugin);
-    app.finish();
-    app.cleanup();
+    let mut app = crate::headless::build();
+    crate::headless::finish(&mut app);
     step(&mut app, 3);
     app
 }

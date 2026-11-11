@@ -3,6 +3,7 @@ mod arena;
 mod arsenal_regression_tests;
 mod art;
 mod audio_controls;
+mod autoplay;
 mod combat;
 mod components;
 mod content;
@@ -16,6 +17,7 @@ mod expedition;
 mod experience;
 mod feedback;
 mod game_audio;
+mod headless;
 mod inventory;
 mod loot;
 mod menu;
@@ -235,7 +237,20 @@ impl Plugin for SurvivorsGamePlugin {
     }
 }
 
-fn main() {
+fn main() -> std::process::ExitCode {
+    // `survivors_prototype simulate ...` plays headless runs and exits; any
+    // other invocation opens the game.
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("simulate") {
+        return autoplay::cli::run(args);
+    }
+    match play() {
+        AppExit::Success => std::process::ExitCode::SUCCESS,
+        AppExit::Error(code) => std::process::ExitCode::from(code.get()),
+    }
+}
+
+fn play() -> AppExit {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -272,5 +287,5 @@ fn main() {
         },
         dev_tools::DebugUiPlugin,
     ));
-    app.run();
+    app.run()
 }
