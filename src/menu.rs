@@ -43,9 +43,15 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(GameState::Paused), cleanup_menu_state)
             .add_systems(OnEnter(GameState::LevelUp), spawn_level_up_menu)
             .add_systems(OnExit(GameState::LevelUp), cleanup_menu_state)
-            .add_systems(OnEnter(GameState::GameOver), spawn_game_over_menu)
+            .add_systems(
+                OnEnter(GameState::GameOver),
+                spawn_game_over_menu.after(crate::expedition::ConcludeExpedition),
+            )
             .add_systems(OnExit(GameState::GameOver), cleanup_menu_state)
-            .add_systems(OnEnter(GameState::Victory), spawn_victory_menu)
+            .add_systems(
+                OnEnter(GameState::Victory),
+                spawn_victory_menu.after(crate::expedition::ConcludeExpedition),
+            )
             .add_systems(OnExit(GameState::Victory), cleanup_menu_state);
     }
 }
@@ -826,6 +832,7 @@ fn spawn_game_over_menu(
     stats: Res<GameStats>,
     build: Res<crate::ui::FinalBuild>,
     telemetry: Res<crate::telemetry::RunTelemetry>,
+    report: Res<crate::expedition::LastExpedition>,
 ) {
     spawn_run_end_menu(
         &mut commands,
@@ -835,6 +842,7 @@ fn spawn_game_over_menu(
         &stats,
         &build,
         &telemetry,
+        report.0.as_ref(),
     );
 }
 
@@ -843,6 +851,7 @@ fn spawn_victory_menu(
     stats: Res<GameStats>,
     build: Res<crate::ui::FinalBuild>,
     telemetry: Res<crate::telemetry::RunTelemetry>,
+    report: Res<crate::expedition::LastExpedition>,
 ) {
     spawn_run_end_menu(
         &mut commands,
@@ -852,9 +861,24 @@ fn spawn_victory_menu(
         &stats,
         &build,
         &telemetry,
+        report.0.as_ref(),
     );
 }
 
+/// The haul line on a result screen, e.g. `Haul: Gold 12, Essence 8 (banked)`.
+pub(crate) fn haul_summary(report: &crate::expedition::ExpeditionReport) -> String {
+    let destination = if report.banked {
+        "banked to the estate"
+    } else {
+        "sandbox run, not banked"
+    };
+    format!("Haul: {} ({destination})", report.haul)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Result screens combine run totals, the final build, telemetry, and the expedition haul."
+)]
 fn spawn_run_end_menu(
     commands: &mut Commands,
     menu_type: MenuType,
@@ -863,9 +887,10 @@ fn spawn_run_end_menu(
     stats: &GameStats,
     build: &crate::ui::FinalBuild,
     telemetry: &crate::telemetry::RunTelemetry,
+    report: Option<&crate::expedition::ExpeditionReport>,
 ) {
     let seconds = stats.time_elapsed as u32;
-    let summary = format!(
+    let mut summary = format!(
         "Time: {:02}:{:02}   |   Enemies defeated: {}   |   Gold: {}\nDamage taken: {}",
         seconds / 60,
         seconds % 60,
@@ -873,6 +898,10 @@ fn spawn_run_end_menu(
         stats.gold,
         telemetry.damage_taken,
     );
+    if let Some(report) = report {
+        summary.push('\n');
+        summary.push_str(&haul_summary(report));
+    }
     commands
         .spawn((
             Node {
@@ -907,6 +936,7 @@ fn spawn_run_end_menu(
                     TextColor(Color::WHITE),
                 ));
                 parent.spawn((
+                    RunSummaryReadout,
                     Text::new(summary),
                     TextFont {
                         font_size: FontSize::Px(20.0),
@@ -931,6 +961,9 @@ fn spawn_run_end_menu(
 
 #[derive(Component)]
 pub(crate) struct FinalBuildReadout;
+
+#[derive(Component)]
+pub(crate) struct RunSummaryReadout;
 
 fn spawn_final_build(
     parent: &mut ChildSpawnerCommands,

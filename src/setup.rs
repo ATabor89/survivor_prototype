@@ -16,7 +16,6 @@ use bevy::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::io::{Read, Write};
 use strum::IntoEnumIterator;
 
 pub const CONFIG_PATH: &str = "run-config.ron";
@@ -158,18 +157,13 @@ pub fn export_configuration(world: &mut World) -> Result<(), String> {
 }
 
 pub fn import_configuration(world: &mut World) -> Result<(), String> {
-    let mut text = String::new();
-    std::fs::File::open(CONFIG_PATH)
-        .map_err(|e| format!("{CONFIG_PATH}: {e}"))?
-        .take(64 * 1024 + 1)
-        .read_to_string(&mut text)
-        .map_err(|e| format!("{CONFIG_PATH}: {e}"))?;
+    let text = crate::storage::read_text(std::path::Path::new(CONFIG_PATH))?;
     import_configuration_text(world, &text)
 }
 
 /// Validate the complete recipe before replacing any staged or active state.
 pub fn import_configuration_text(world: &mut World, text: &str) -> Result<(), String> {
-    if text.len() > 64 * 1024 {
+    if text.len() > crate::storage::MAX_FILE_BYTES {
         return Err("Run config is larger than 64 KiB.".into());
     }
     let config: RunConfiguration = ron::from_str(text).map_err(|e| e.to_string())?;
@@ -186,22 +180,7 @@ pub(crate) fn write_configuration_to(
     config: &RunConfiguration,
     path: &std::path::Path,
 ) -> Result<(), String> {
-    let text = ron::ser::to_string_pretty(config, ron::ser::PrettyConfig::default())
-        .map_err(|e| e.to_string())?;
-    // Same-directory replacement keeps an earlier exported recipe intact if a
-    // write fails. Rust's rename replaces an existing file on Windows and Unix.
-    let temporary = path.with_extension(format!("ron.{}.tmp", std::process::id()));
-    let result = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|error| format!("{}: {error}", path.display()))
+    crate::storage::write_ron(config, path)
 }
 
 pub fn start_configured_run(world: &mut World) -> Result<(), String> {

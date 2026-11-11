@@ -11,6 +11,7 @@ mod death;
 mod dev_tools;
 mod enemy_behavior;
 mod events;
+mod expedition;
 mod experience;
 mod feedback;
 mod game_audio;
@@ -18,9 +19,11 @@ mod inventory;
 mod loot;
 mod menu;
 mod physics;
+mod profile;
 mod resources;
 mod run;
 mod setup;
+mod storage;
 mod systems;
 mod telemetry;
 mod types;
@@ -36,6 +39,8 @@ mod debug_regression_tests;
 mod encounter_regression_tests;
 #[cfg(test)]
 mod enemy_behavior_regression_tests;
+#[cfg(test)]
+mod expedition_regression_tests;
 #[cfg(test)]
 mod inventory_regression_tests;
 #[cfg(test)]
@@ -129,6 +134,7 @@ impl Plugin for SurvivorsGamePlugin {
                 setup::SetupPlugin,
                 art::ArtPlugin,
             ))
+            .add_plugins((profile::ProfilePlugin, expedition::ExpeditionPlugin))
             // Startup systems
             .add_systems(
                 Startup,
@@ -247,6 +253,10 @@ fn main() {
     .add_plugins(game_audio::GameAudioPlugin);
     // Headless gameplay harnesses start in Playing; the executable opens setup.
     app.insert_state(GameState::MainMenu);
+    // Likewise, only the executable reads and writes saved progress on disk.
+    let save_path = std::path::Path::new(profile::SAVE_PATH);
+    app.insert_resource(profile::Profile::load_or_default(save_path))
+        .insert_resource(profile::ProfileStore::at(save_path));
     #[cfg(feature = "dev-tools")]
     app.add_plugins((
         bevy_egui::EguiPlugin {

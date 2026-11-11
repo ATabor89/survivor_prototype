@@ -1,3 +1,5 @@
 /target
 /.restart-backups
 /run-config.ron
+/save.ron
+/save.ron.bak
