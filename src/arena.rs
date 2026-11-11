@@ -1,6 +1,6 @@
 //! Authored finite stages. Rapier handles walls and obstacles; bounds describe layout.
 use crate::{
-    components::Player,
+    components::CameraFocus,
     content::{ActiveStage, GameContent, StageDefinition, StageLayout},
     resources::GameState,
 };
@@ -88,16 +88,61 @@ pub fn rebuild_arena(
 }
 
 fn stage_projection(stage: &StageDefinition) -> Projection {
+    view_projection(Vec2::from_array(stage.half_size))
+}
+
+/// The camera framing for a bounded area with the given half-size.
+pub fn view_projection(half_size: Vec2) -> Projection {
     // Bound both world-view dimensions even at extreme window aspect ratios.
     // Narrow stages frame their short axis; a wide display must not expose an
     // entire long axis and eliminate all offscreen spawn locations.
     Projection::Orthographic(OrthographicProjection {
         scaling_mode: bevy::camera::ScalingMode::AutoMax {
-            max_width: (stage.half_size[0] * 2.0 + 128.0).min(1280.0),
-            max_height: (stage.half_size[1] * 2.0 + 128.0).min(720.0),
+            max_width: (half_size.x * 2.0 + 128.0).min(1280.0),
+            max_height: (half_size.y * 2.0 + 128.0).min(720.0),
         },
         ..OrthographicProjection::default_2d()
     })
+}
+
+/// What solid scenery collides with: the player, enemies, and attacks.
+pub fn world_collision_groups() -> CollisionGroups {
+    CollisionGroups::new(
+        WORLD_GROUP,
+        Group::GROUP_1 | Group::GROUP_2 | Group::GROUP_3,
+    )
+}
+
+/// Four fixed Rapier walls just outside a bounded area.
+pub fn spawn_boundary_walls(parent: &mut ChildSpawnerCommands, half: Vec2) {
+    let thickness = 64.0;
+    for (center, wall_half) in [
+        (
+            Vec2::new(half.x + thickness / 2.0, 0.0),
+            Vec2::new(thickness / 2.0, half.y + thickness),
+        ),
+        (
+            Vec2::new(-half.x - thickness / 2.0, 0.0),
+            Vec2::new(thickness / 2.0, half.y + thickness),
+        ),
+        (
+            Vec2::new(0.0, half.y + thickness / 2.0),
+            Vec2::new(half.x + thickness, thickness / 2.0),
+        ),
+        (
+            Vec2::new(0.0, -half.y - thickness / 2.0),
+            Vec2::new(half.x + thickness, thickness / 2.0),
+        ),
+    ] {
+        parent.spawn((
+            Name::new("Stage boundary"),
+            RigidBody::Fixed,
+            Collider::cuboid(wall_half.x, wall_half.y),
+            world_collision_groups(),
+            Sprite::from_color(Color::srgb(0.29, 0.29, 0.26), wall_half * 2.0),
+            Transform::from_translation(center.extend(-2.0)),
+        ));
+    }
 }
 
 fn spawn_stage(commands: &mut Commands, stage: &StageDefinition) {
@@ -174,37 +219,7 @@ fn spawn_stage(commands: &mut Commands, stage: &StageDefinition) {
                     Transform::from_translation((position + Vec2::Y * 98.0).extend(-17.0)),
                 ));
             }
-            let thickness = 64.0;
-            for (center, wall_half) in [
-                (
-                    Vec2::new(half.x + thickness / 2.0, 0.0),
-                    Vec2::new(thickness / 2.0, half.y + thickness),
-                ),
-                (
-                    Vec2::new(-half.x - thickness / 2.0, 0.0),
-                    Vec2::new(thickness / 2.0, half.y + thickness),
-                ),
-                (
-                    Vec2::new(0.0, half.y + thickness / 2.0),
-                    Vec2::new(half.x + thickness, thickness / 2.0),
-                ),
-                (
-                    Vec2::new(0.0, -half.y - thickness / 2.0),
-                    Vec2::new(half.x + thickness, thickness / 2.0),
-                ),
-            ] {
-                arena.spawn((
-                    Name::new("Stage boundary"),
-                    RigidBody::Fixed,
-                    Collider::cuboid(wall_half.x, wall_half.y),
-                    CollisionGroups::new(
-                        WORLD_GROUP,
-                        Group::GROUP_1 | Group::GROUP_2 | Group::GROUP_3,
-                    ),
-                    Sprite::from_color(Color::srgb(0.29, 0.29, 0.26), wall_half * 2.0),
-                    Transform::from_translation(center.extend(-2.0)),
-                ));
-            }
+            spawn_boundary_walls(arena, half);
             for obstacle in &stage.obstacles {
                 let obstacle_half = Vec2::from_array(obstacle.half_size);
                 arena.spawn((
@@ -212,10 +227,7 @@ fn spawn_stage(commands: &mut Commands, stage: &StageDefinition) {
                     Name::new("Stone plinth"),
                     RigidBody::Fixed,
                     Collider::cuboid(obstacle_half.x, obstacle_half.y),
-                    CollisionGroups::new(
-                        WORLD_GROUP,
-                        Group::GROUP_1 | Group::GROUP_2 | Group::GROUP_3,
-                    ),
+                    world_collision_groups(),
                     Sprite::from_color(Color::srgb(0.3, 0.31, 0.3), obstacle_half * 2.0),
                     Transform::from_translation(Vec2::from_array(obstacle.center).extend(-1.0)),
                 ));
@@ -234,10 +246,10 @@ pub fn camera_half_view(projection: &Projection) -> Vec2 {
 
 fn follow_camera(
     bounds: Res<ArenaBounds>,
-    player: Query<&Transform, (With<Player>, Without<GameCamera>)>,
+    focus: Query<&Transform, (With<CameraFocus>, Without<GameCamera>)>,
     mut camera: Query<(&mut Transform, &Projection), With<GameCamera>>,
 ) {
-    let Ok(player) = player.single() else {
+    let Ok(player) = focus.single() else {
         return;
     };
     for (mut transform, projection) in &mut camera {

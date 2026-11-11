@@ -103,6 +103,24 @@ fn verify_physics_config(
     }
 }
 
+/// A character controller for walking on a top-down map: it slides along
+/// world geometry and ignores everything else.
+pub fn top_down_controller() -> KinematicCharacterController {
+    KinematicCharacterController {
+        autostep: None,
+        snap_to_ground: None,
+        // Top-down movement has no uphill/downhill restrictions.
+        max_slope_climb_angle: std::f32::consts::PI,
+        min_slope_slide_angle: -std::f32::consts::PI,
+        apply_impulse_to_dynamic_bodies: false,
+        filter_groups: Some(CollisionGroups::new(
+            Group::GROUP_1,
+            crate::arena::WORLD_GROUP,
+        )),
+        ..default()
+    }
+}
+
 pub fn setup_physics_bodies(
     mut commands: Commands,
     new_players: Query<Entity, (Added<Player>, Without<RigidBody>)>,
@@ -120,19 +138,7 @@ pub fn setup_physics_bodies(
                 .entity(entity)
                 .insert((
                     RigidBody::KinematicPositionBased,
-                    KinematicCharacterController {
-                        autostep: None,
-                        snap_to_ground: None,
-                        // Top-down movement has no uphill/downhill restrictions.
-                        max_slope_climb_angle: std::f32::consts::PI,
-                        min_slope_slide_angle: -std::f32::consts::PI,
-                        apply_impulse_to_dynamic_bodies: false,
-                        filter_groups: Some(CollisionGroups::new(
-                            player_group,
-                            crate::arena::WORLD_GROUP,
-                        )),
-                        ..default()
-                    },
+                    top_down_controller(),
                     Collider::ball(12.0),
                     ActiveEvents::COLLISION_EVENTS,
                     CollisionGroups::new(

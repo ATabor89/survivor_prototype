@@ -1,0 +1,60 @@
+// The estate hub. Edit and relaunch; the file is validated at startup.
+// Positions are world units with the origin at the centre and +y up.
+(
+    half_size: (800.0, 520.0),
+    spawn: (0.0, 40.0),
+    // Weapons the expedition table offers. More unlock through the estate later.
+    expedition_weapons: [magick_circle, inscribed_needles, alchemical_vessel],
+    buildings: [
+        (name: "Manor", center: (0.0, 370.0), half_size: (210.0, 110.0), color: (0.30, 0.25, 0.22)),
+        (name: "Archive", center: (-540.0, 90.0), half_size: (130.0, 90.0), color: (0.22, 0.27, 0.32)),
+        (name: "Provisioner", center: (540.0, 90.0), half_size: (130.0, 90.0), color: (0.30, 0.28, 0.20)),
+        (name: "Chapel", center: (-430.0, -340.0), half_size: (110.0, 80.0), color: (0.27, 0.26, 0.30)),
+        (name: "Inn", center: (440.0, -340.0), half_size: (140.0, 80.0), color: (0.32, 0.24, 0.20)),
+    ],
+    stations: [
+        (kind: ExpeditionTable, name: "Map room", position: (0.0, 215.0)),
+    ],
+    npcs: [
+        (
+            id: "archivist",
+            name: "Maren, Archivist",
+            position: (-540.0, -50.0),
+            color: (0.55, 0.75, 0.95),
+            lines: [
+                "The manor is yours now, and so is its map room. Every expedition starts at that table.",
+                "Bring back whatever you find. Gold spends anywhere. Essence and seals are harder to come by.",
+            ],
+            returning_lines: [
+                "You came back. Not everyone does.",
+                "Whatever you carried home is in the ledger. The estate will have uses for it soon.",
+            ],
+        ),
+        (
+            id: "provisioner",
+            name: "Tobias, Provisioner",
+            position: (540.0, -50.0),
+            color: (0.95, 0.80, 0.45),
+            lines: [
+                "I can't outfit you yet. The shelves stay bare until trade picks up.",
+                "Come back with gold and we'll talk.",
+            ],
+            returning_lines: [
+                "Gold already? Hold on to it. I'll have stock worth buying before long.",
+            ],
+        ),
+        (
+            id: "wren",
+            name: "Old Wren",
+            position: (-140.0, -200.0),
+            color: (0.70, 0.90, 0.65),
+            lines: [
+                "Three roads lead out of here: a courtyard, a processional, and a descent. None of them is kind.",
+                "The courtyard's warden only shows itself at the tenth minute. Outlast everything before it.",
+            ],
+            returning_lines: [
+                "Bosses carry seals. Finish an expedition and you'll bring home more of them.",
+            ],
+        ),
+    ],
+)

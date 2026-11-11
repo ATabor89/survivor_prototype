@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 
+/// The stage camera follows the entity carrying this marker.
+#[derive(Component, Default)]
+pub struct CameraFocus;
+
 #[derive(Component)]
+#[require(CameraFocus)]
 pub struct Player {
     pub speed: f32,
     pub magnet_strength: f32,

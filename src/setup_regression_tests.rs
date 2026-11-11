@@ -277,8 +277,9 @@ fn title_keyboard_and_controller_navigation_select_stages_without_starting() {
         .resource_mut::<NextState<GameState>>()
         .set(GameState::MainMenu);
     step(&mut app, 3);
-    // Initial focus is Begin; wrap past Quit, then choose the second stage.
-    for _ in 0..3 {
+    // Initial focus is Begin; wrap past the estate and Quit, then choose the
+    // second stage.
+    for _ in 0..4 {
         crate::tests::key(&mut app, KeyCode::ArrowDown);
     }
     crate::tests::key(&mut app, KeyCode::Enter);

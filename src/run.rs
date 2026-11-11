@@ -29,7 +29,8 @@ impl Plugin for RunPlugin {
                 )
                     .chain(),
             );
-        app.add_systems(OnEnter(GameState::MainMenu), reset_run);
+        app.add_systems(OnEnter(GameState::MainMenu), reset_run)
+            .add_systems(OnEnter(GameState::Estate), reset_run);
     }
 }
 

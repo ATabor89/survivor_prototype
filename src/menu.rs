@@ -29,6 +29,7 @@ impl Plugin for MenuPlugin {
             )
             .add_systems(OnEnter(GameState::MainMenu), crate::ui::reset_final_build)
             .add_systems(OnEnter(GameState::Restarting), crate::ui::reset_final_build)
+            .add_systems(OnEnter(GameState::Estate), crate::ui::reset_final_build)
             .add_systems(
                 Update,
                 (
@@ -79,6 +80,7 @@ pub enum MenuType {
     PatternSelect,
     GameOver,
     Victory,
+    Estate,
 }
 
 // Simplified menu actions
@@ -87,7 +89,10 @@ pub enum MenuAction {
     RestartRun,
     ResumeGame,
     ReturnToTitle,
+    ReturnToEstate,
     QuitGame,
+    /// Handled by `crate::estate`, which reads [`MenuActivation`] itself.
+    Estate(crate::estate::EstateAction),
     SelectUpgrade(UpgradeChoice),
     SelectPattern(PatternType),
 }
@@ -297,9 +302,9 @@ pub(crate) fn get_rarity_color(rarity: &Rarity) -> Color {
 
 /// One activation per frame, scoped to the active menu root.
 #[derive(Message)]
-struct MenuActivation {
-    root: Entity,
-    action: MenuAction,
+pub(crate) struct MenuActivation {
+    pub root: Entity,
+    pub action: MenuAction,
 }
 
 #[derive(Default)]
@@ -425,7 +430,12 @@ pub(crate) enum PauseReadout {
     Passives,
 }
 
-pub fn spawn_pause_menu(mut commands: Commands) {
+pub fn spawn_pause_menu(mut commands: Commands, origin: Res<crate::expedition::RunOrigin>) {
+    // Leaving an estate expedition early returns home without its haul.
+    let leave = match *origin {
+        crate::expedition::RunOrigin::Sandbox => ("Main menu", MenuAction::ReturnToTitle),
+        crate::expedition::RunOrigin::Estate => ("Abandon run", MenuAction::ReturnToEstate),
+    };
     commands
         .spawn((
             Node {
@@ -506,7 +516,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                         .with_children(|buttons| {
                             for (index, (label, action)) in [
                                 ("Resume", MenuAction::ResumeGame),
-                                ("Main menu", MenuAction::ReturnToTitle),
+                                leave.clone(),
                                 ("Quit", MenuAction::QuitGame),
                             ]
                             .into_iter()
@@ -529,7 +539,7 @@ fn spawn_compact_button(
         .spawn((
             button(),
             Node {
-                width: Val::Px(140.0),
+                width: Val::Px(170.0),
                 height: Val::Px(38.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -748,6 +758,7 @@ fn dispatch_menu_action(
             MenuAction::RestartRun => next_state.set(GameState::Restarting),
             MenuAction::ResumeGame => next_state.set(GameState::Playing),
             MenuAction::ReturnToTitle => next_state.set(GameState::MainMenu),
+            MenuAction::ReturnToEstate => next_state.set(GameState::Estate),
             MenuAction::QuitGame => next_state.set(GameState::Quit),
             MenuAction::SelectUpgrade(choice) if root.menu_type == MenuType::LevelUp => {
                 commands.entity(activation.root).despawn();
@@ -951,9 +962,23 @@ fn spawn_run_end_menu(
                         ..default()
                     })
                     .with_children(|parent| {
-                        spawn_compact_button(parent, "Play again", MenuAction::RestartRun, true);
-                        spawn_compact_button(parent, "Main menu", MenuAction::ReturnToTitle, false);
-                        spawn_compact_button(parent, "Quit", MenuAction::QuitGame, false);
+                        // Estate expeditions lead home; sandbox runs loop on themselves.
+                        let buttons = if report.is_some_and(|report| report.banked) {
+                            [
+                                ("Return to estate", MenuAction::ReturnToEstate),
+                                ("Depart again", MenuAction::RestartRun),
+                                ("Quit", MenuAction::QuitGame),
+                            ]
+                        } else {
+                            [
+                                ("Play again", MenuAction::RestartRun),
+                                ("Main menu", MenuAction::ReturnToTitle),
+                                ("Quit", MenuAction::QuitGame),
+                            ]
+                        };
+                        for (index, (label, action)) in buttons.into_iter().enumerate() {
+                            spawn_compact_button(parent, label, action, index == 0);
+                        }
                     });
             });
         });
