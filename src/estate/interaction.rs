@@ -12,6 +12,7 @@ pub enum InteractionKind {
     /// Speak with the NPC at this index in the estate content.
     Talk(usize),
     ExpeditionTable,
+    Workshop,
 }
 
 #[derive(Component)]
@@ -79,5 +80,6 @@ fn interact(
             next.set(EstateScreen::Dialogue);
         }
         InteractionKind::ExpeditionTable => next.set(EstateScreen::ExpeditionTable),
+        InteractionKind::Workshop => next.set(EstateScreen::Workshop),
     }
 }

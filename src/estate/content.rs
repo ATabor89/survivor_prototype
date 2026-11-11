@@ -1,4 +1,7 @@
 //! Authored estate layout and dialogue, validated like the stage data.
+use crate::inventory::{PassiveType, MAX_PASSIVES};
+use crate::profile::{Profile, Stockpile};
+use crate::setup::PassiveLoadout;
 use crate::weapons::WeaponType;
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -20,6 +23,31 @@ pub struct EstateContent {
     pub stations: Vec<StationDefinition>,
     #[serde(default)]
     pub npcs: Vec<NpcDefinition>,
+    /// Improvements the workshop can build, in the order they are listed.
+    #[serde(default)]
+    pub upgrades: Vec<UpgradeDefinition>,
+}
+
+/// A one-time estate improvement bought with expedition resources.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpgradeDefinition {
+    /// Stable identifier stored in the saved profile.
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub cost: Stockpile,
+    pub effect: EstateEffect,
+}
+
+/// How a built upgrade changes later expeditions. Every effect is expressed
+/// through the run recipe, so expeditions need no knowledge of the estate.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum EstateEffect {
+    /// Adds a starting-weapon choice at the expedition table.
+    UnlockWeapon(WeaponType),
+    /// Every estate expedition begins with this passive at level one.
+    StartingPassive(PassiveType),
 }
 
 /// A solid, labelled block. Interiors are not modelled in the prototype.
@@ -36,6 +64,8 @@ pub struct BuildingDefinition {
 pub enum StationKind {
     /// Opens the menu that plans and launches an expedition.
     ExpeditionTable,
+    /// Opens the menu that builds estate upgrades.
+    Workshop,
 }
 
 /// A fixed spot the player can use.
@@ -91,6 +121,35 @@ impl EstateContent {
             )
         })?;
         Self::parse(&text).map_err(|error| format!("{}: {error}", path.display()))
+    }
+
+    /// Starting weapons on offer: the basics plus every unlocked one.
+    pub fn available_weapons(&self, profile: &Profile) -> Vec<WeaponType> {
+        let unlocked = self
+            .upgrades
+            .iter()
+            .filter(|upgrade| profile.owns(&upgrade.id))
+            .filter_map(|upgrade| match upgrade.effect {
+                EstateEffect::UnlockWeapon(weapon) => Some(weapon),
+                EstateEffect::StartingPassive(_) => None,
+            });
+        self.expedition_weapons
+            .iter()
+            .copied()
+            .chain(unlocked)
+            .collect()
+    }
+
+    /// Passives every estate expedition starts with, from built upgrades.
+    pub fn starting_passives(&self, profile: &Profile) -> Vec<PassiveLoadout> {
+        self.upgrades
+            .iter()
+            .filter(|upgrade| profile.owns(&upgrade.id))
+            .filter_map(|upgrade| match upgrade.effect {
+                EstateEffect::StartingPassive(kind) => Some(PassiveLoadout { kind, level: 1 }),
+                EstateEffect::UnlockWeapon(_) => None,
+            })
+            .collect()
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -168,7 +227,50 @@ impl EstateContent {
             )?;
             self.ensure_walkable(&format!("npc '{}'", npc.id), npc.position)?;
         }
-        Ok(())
+        self.validate_upgrades()
+    }
+
+    fn validate_upgrades(&self) -> Result<(), String> {
+        ensure(
+            self.upgrades.is_empty()
+                || self
+                    .stations
+                    .iter()
+                    .any(|station| station.kind == StationKind::Workshop),
+            "estate upgrades need a Workshop station to build them",
+        )?;
+        let mut ids = HashSet::new();
+        let mut weapons: HashSet<_> = self.expedition_weapons.iter().copied().collect();
+        let mut passives = HashSet::new();
+        for upgrade in &self.upgrades {
+            ensure(
+                !upgrade.id.trim().is_empty() && ids.insert(upgrade.id.as_str()),
+                &format!("upgrade id '{}' must be non-empty and unique", upgrade.id),
+            )?;
+            ensure(
+                !upgrade.name.trim().is_empty() && !upgrade.description.trim().is_empty(),
+                &format!("upgrade '{}' needs a name and a description", upgrade.id),
+            )?;
+            ensure(
+                upgrade.cost != Stockpile::default(),
+                &format!("upgrade '{}' must cost something", upgrade.id),
+            )?;
+            let fresh = match upgrade.effect {
+                EstateEffect::UnlockWeapon(weapon) => weapons.insert(weapon),
+                EstateEffect::StartingPassive(kind) => passives.insert(kind),
+            };
+            ensure(
+                fresh,
+                &format!(
+                    "upgrade '{}' repeats a weapon or passive that is already granted",
+                    upgrade.id
+                ),
+            )?;
+        }
+        ensure(
+            passives.len() <= MAX_PASSIVES,
+            "estate upgrades grant more starting passives than a run has slots",
+        )
     }
 
     /// The point is inside the walls and clear of every building, so the

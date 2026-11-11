@@ -13,7 +13,47 @@
         (name: "Inn", center: (440.0, -340.0), half_size: (140.0, 80.0), color: (0.32, 0.24, 0.20)),
     ],
     stations: [
-        (kind: ExpeditionTable, name: "Map room", position: (0.0, 215.0)),
+        (kind: ExpeditionTable, name: "Map room", position: (-90.0, 215.0)),
+        (kind: Workshop, name: "Workshop", position: (110.0, 215.0)),
+    ],
+    // One-time improvements built at the workshop. Prices are provisional.
+    // Effects: UnlockWeapon(<weapon id>) or StartingPassive(<passive kind>).
+    upgrades: [
+        (
+            id: "whetstone",
+            name: "Whetstone and Ward",
+            description: "Adds the Knife of the Art to the map room's starting weapons.",
+            cost: (essence: 30),
+            effect: UnlockWeapon(knife_of_the_art),
+        ),
+        (
+            id: "larder",
+            name: "Stocked Larder",
+            description: "Every expedition begins with a Vital Relic.",
+            cost: (gold: 15),
+            effect: StartingPassive(max_health),
+        ),
+        (
+            id: "bell_frame",
+            name: "Bell Frame",
+            description: "Adds the Resonant Recitation to the map room's starting weapons.",
+            cost: (gold: 10, essence: 60),
+            effect: UnlockWeapon(resonant_recitation),
+        ),
+        (
+            id: "talisman_press",
+            name: "Talisman Press",
+            description: "Adds the Planetary Talismans to the map room's starting weapons.",
+            cost: (essence: 60, seals: 1),
+            effect: UnlockWeapon(planetary_talismans),
+        ),
+        (
+            id: "pilgrim_road",
+            name: "Pilgrim's Road",
+            description: "Every expedition begins with Pilgrim's Boots.",
+            cost: (seals: 2),
+            effect: StartingPassive(move_speed),
+        ),
     ],
     npcs: [
         (
@@ -23,11 +63,11 @@
             color: (0.55, 0.75, 0.95),
             lines: [
                 "The manor is yours now, and so is its map room. Every expedition starts at that table.",
-                "Bring back whatever you find. Gold spends anywhere. Essence and seals are harder to come by.",
+                "Bring back whatever you find. The workshop beside it turns gold, essence, and seals into improvements.",
             ],
             returning_lines: [
                 "You came back. Not everyone does.",
-                "Whatever you carried home is in the ledger. The estate will have uses for it soon.",
+                "Whatever you carried home is in the ledger. The workshop by the manor can put it to use.",
             ],
         ),
         (

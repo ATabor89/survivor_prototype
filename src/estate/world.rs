@@ -113,6 +113,10 @@ fn build_estate(
                         InteractionKind::ExpeditionTable,
                         format!("Plan an expedition at the {}", station.name),
                     ),
+                    StationKind::Workshop => (
+                        InteractionKind::Workshop,
+                        format!("Build improvements at the {}", station.name),
+                    ),
                 };
                 estate.spawn((
                     Name::new(station.name.clone()),

@@ -1,8 +1,10 @@
+use super::content::EstateEffect;
 use super::content::{EstateContent, EMBEDDED_ESTATE};
 use super::dialogue::{ActiveDialogue, DialogueLine};
 use super::expedition_table::ExpeditionPlan;
 use super::hud::{InteractionPrompt, LedgerReadout};
 use super::interaction::{Focus, Interactable, InteractionKind};
+use super::workshop::{build, UpgradeRow, WorkshopSummary};
 use super::world::{EstateAvatar, EstateRoot, Npc, AVATAR_RADIUS, AVATAR_SPEED};
 use super::EstateScreen;
 use crate::arena::ArenaRoot;
@@ -106,6 +108,40 @@ fn open_table(app: &mut App) {
     key(app, KeyCode::KeyE);
     step(app, 2);
     assert_eq!(screen(app), EstateScreen::ExpeditionTable);
+}
+
+fn open_workshop(app: &mut App) {
+    let workshop = position_of(app, InteractionKind::Workshop);
+    place_avatar(app, workshop + Vec2::new(0.0, -40.0));
+    key(app, KeyCode::KeyE);
+    step(app, 2);
+    assert_eq!(screen(app), EstateScreen::Workshop);
+}
+
+/// The index and definition of the first upgrade with a matching effect.
+fn upgrade_where(
+    app: &App,
+    matches: impl Fn(EstateEffect) -> bool,
+) -> (usize, super::content::UpgradeDefinition) {
+    app.world()
+        .resource::<EstateContent>()
+        .upgrades
+        .iter()
+        .cloned()
+        .enumerate()
+        .find(|(_, upgrade)| matches(upgrade.effect))
+        .expect("the bundled estate has an upgrade of every kind")
+}
+
+fn row_detail(app: &mut App, index: usize) -> String {
+    let (_, children) = app
+        .world_mut()
+        .query::<(&UpgradeRow, &Children)>()
+        .iter(app.world())
+        .find(|(row, _)| row.0 == index)
+        .unwrap();
+    let detail = children[1];
+    app.world().get::<Text>(detail).unwrap().0.clone()
 }
 
 fn kill_player(app: &mut App) {
@@ -485,4 +521,210 @@ fn the_title_screen_leads_into_the_estate() {
     step(&mut app, 3);
     assert_eq!(state(&app), GameState::Estate);
     assert_eq!(count::<EstateAvatar>(&mut app), 1);
+}
+
+#[test]
+fn building_spends_exactly_the_cost_once_and_refusals_change_nothing() {
+    let app = estate();
+    let (_, upgrade) = upgrade_where(&app, |effect| {
+        matches!(effect, EstateEffect::UnlockWeapon(_))
+    });
+    let mut profile = Profile::default();
+    let error = build(&mut profile, &upgrade).unwrap_err();
+    assert!(error.contains(&upgrade.cost.to_string()), "{error}");
+    assert_eq!(profile, Profile::default());
+
+    profile.stockpile = upgrade.cost;
+    profile.stockpile.add(&Stockpile {
+        gold: 1,
+        essence: 2,
+        seals: 3,
+    });
+    build(&mut profile, &upgrade).unwrap();
+    assert!(profile.owns(&upgrade.id));
+    assert_eq!(
+        profile.stockpile,
+        Stockpile {
+            gold: 1,
+            essence: 2,
+            seals: 3
+        }
+    );
+
+    let rich = profile.clone();
+    assert!(build(&mut profile, &upgrade)
+        .unwrap_err()
+        .contains("already built"));
+    assert_eq!(profile, rich);
+}
+
+#[test]
+fn the_workshop_menu_builds_what_is_affordable_and_explains_what_is_not() {
+    let mut app = estate();
+    let first = app.world().resource::<EstateContent>().upgrades[0].clone();
+    open_workshop(&mut app);
+    assert_eq!(selected_label(&mut app), first.name);
+    assert_eq!(row_detail(&mut app, 0), first.cost.to_string());
+    assert!(text_of::<WorkshopSummary>(&mut app).contains(&first.description));
+
+    // Too poor: nothing is built and the reason is shown.
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 1);
+    assert_eq!(*app.world().resource::<Profile>(), Profile::default());
+    assert!(text_of::<WorkshopSummary>(&mut app).contains("needs"));
+
+    app.world_mut().resource_mut::<Profile>().stockpile = first.cost;
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 1);
+    let profile = app.world().resource::<Profile>().clone();
+    assert!(profile.owns(&first.id));
+    assert_eq!(profile.stockpile, Stockpile::default());
+    assert_eq!(row_detail(&mut app, 0), "Built");
+    assert!(text_of::<WorkshopSummary>(&mut app).contains(&format!("Built {}", first.name)));
+
+    // A second press cannot charge again.
+    app.world_mut().resource_mut::<Profile>().stockpile = first.cost;
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 1);
+    assert_eq!(app.world().resource::<Profile>().stockpile, first.cost);
+    assert_eq!(app.world().resource::<Profile>().upgrades.len(), 1);
+
+    key(&mut app, KeyCode::Escape);
+    step(&mut app, 2);
+    assert_eq!(screen(&app), EstateScreen::Roaming);
+    assert_eq!(count::<UpgradeRow>(&mut app), 0);
+}
+
+#[test]
+fn an_unlocked_weapon_appears_at_the_table_and_can_start_an_expedition() {
+    let mut app = estate();
+    let (_, upgrade) = upgrade_where(&app, |effect| {
+        matches!(effect, EstateEffect::UnlockWeapon(_))
+    });
+    let EstateEffect::UnlockWeapon(weapon) = upgrade.effect else {
+        unreachable!()
+    };
+    let content = app.world().resource::<EstateContent>().clone();
+    assert!(!content
+        .available_weapons(app.world().resource::<Profile>())
+        .contains(&weapon));
+    // Without the upgrade the weapon cannot be smuggled into a plan.
+    let stages = app
+        .world()
+        .resource::<crate::content::GameContent>()
+        .clone();
+    let plan = ExpeditionPlan { stage: 0, weapon };
+    assert!(plan
+        .recipe(&stages, &content, app.world().resource::<Profile>())
+        .is_none());
+
+    app.world_mut()
+        .resource_mut::<Profile>()
+        .upgrades
+        .push(upgrade.id);
+    open_table(&mut app);
+    // Depart sits below the weapons; the newly unlocked one is listed last.
+    key(&mut app, KeyCode::ArrowUp);
+    assert_eq!(selected_label(&mut app), weapon.to_string());
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::ArrowDown);
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 4);
+
+    assert_eq!(state(&app), GameState::Playing);
+    let owned: Vec<_> = app
+        .world_mut()
+        .query::<&WeaponMeta>()
+        .iter(app.world())
+        .map(|meta| meta.weapon_type)
+        .collect();
+    assert_eq!(owned, vec![weapon]);
+}
+
+#[test]
+fn a_starting_passive_upgrade_equips_estate_expeditions_only() {
+    use crate::inventory::PassiveInventory;
+    let mut app = estate();
+    let (_, upgrade) = upgrade_where(&app, |effect| {
+        matches!(effect, EstateEffect::StartingPassive(_))
+    });
+    let EstateEffect::StartingPassive(kind) = upgrade.effect else {
+        unreachable!()
+    };
+    app.world_mut()
+        .resource_mut::<Profile>()
+        .upgrades
+        .push(upgrade.id);
+    open_table(&mut app);
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 4);
+    assert_eq!(state(&app), GameState::Playing);
+    let player = crate::tests::player(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<PassiveInventory>(player)
+            .unwrap()
+            .level(kind),
+        1
+    );
+
+    // The sandbox recipe is untouched by estate progress.
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::MainMenu);
+    step(&mut app, 3);
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 4);
+    assert_eq!(state(&app), GameState::Playing);
+    let player = crate::tests::player(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<PassiveInventory>(player)
+            .unwrap()
+            .level(kind),
+        0
+    );
+}
+
+#[test]
+fn upgrade_definitions_are_validated() {
+    let estate = |stations: &str, upgrades: &str| {
+        format!(
+            "(half_size: (400.0, 300.0), spawn: (0.0, 0.0), expedition_weapons: [magick_circle], \
+             stations: [(kind: ExpeditionTable, name: \"Table\", position: (0.0, 100.0)){stations}], \
+             upgrades: [{upgrades}])"
+        )
+    };
+    let workshop = ", (kind: Workshop, name: \"Bench\", position: (0.0, -100.0))";
+    let upgrade = |id: &str, cost: &str, effect: &str| {
+        format!("(id: \"{id}\", name: \"N\", description: \"D\", cost: {cost}, effect: {effect}),")
+    };
+    let knife = upgrade("a", "(gold: 1)", "UnlockWeapon(knife_of_the_art)");
+    EstateContent::parse(&estate(workshop, &knife)).unwrap();
+    for (stations, upgrades, reason) in [
+        ("", knife.clone(), "Workshop"),
+        (workshop, format!("{knife}{knife}"), "unique"),
+        (
+            workshop,
+            upgrade("a", "()", "UnlockWeapon(knife_of_the_art)"),
+            "cost something",
+        ),
+        (
+            workshop,
+            upgrade("a", "(gold: 1)", "UnlockWeapon(magick_circle)"),
+            "already granted",
+        ),
+        (
+            workshop,
+            format!(
+                "{}{}",
+                upgrade("a", "(gold: 1)", "StartingPassive(cooldown)"),
+                upgrade("b", "(gold: 1)", "StartingPassive(cooldown)")
+            ),
+            "already granted",
+        ),
+    ] {
+        let error = EstateContent::parse(&estate(stations, &upgrades)).unwrap_err();
+        assert!(error.contains(reason), "{upgrades}: {error}");
+    }
 }
