@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Debug info roughly doubles build size and time; CI only needs pass/fail.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  check:
+    name: Format, Clippy, and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bevy's audio and gamepad backends link against ALSA and udev on Linux.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libasound2-dev libudev-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Tests with dev-tools
+        run: cargo test --locked --features dev-tools
