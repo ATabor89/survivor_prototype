@@ -142,6 +142,20 @@ saves remain future work. The
 [systems review](design/SYSTEMS-REVIEW.md) records the earlier refactor baseline;
 [the design document](design/DESIGN.md) preserves the larger concept.
 
+## Simulated runs
+
+```sh
+cargo run --locked -- simulate --stage all --weapon all --seeds 3
+```
+
+`simulate` plays whole expeditions without a window, using a scripted pilot, and
+prints how each build fared: wins, survival time, level, kills, damage taken, and
+how much of the damage the starting weapon dealt. Options choose stages, starting
+weapons or a full run recipe, how the pilot moves and spends level-ups, seeds,
+and a CSV file with one row per run. The same seed replays the same run on the
+same build, so a tuning change can be measured against identical expeditions.
+See [the autoplay guide](design/AUTOPLAY.md).
+
 ## Verification
 
 ```sh
