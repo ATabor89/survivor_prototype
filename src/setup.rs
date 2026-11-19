@@ -1,4 +1,5 @@
 //! Versioned run recipes and separate seeded streams; physics is not a replay format.
+use crate::run_modifiers::RunModifiers;
 use crate::ui_button::{button, ButtonInteraction, ButtonStateQuery, Pressed};
 use crate::{
     components::Player,
@@ -45,6 +46,9 @@ pub struct RunConfiguration {
     pub weapons: Vec<WeaponLoadout>,
     #[serde(default)]
     pub passives: Vec<PassiveLoadout>,
+    /// Difficulty for the whole run; omitted from files when unchanged.
+    #[serde(default, skip_serializing_if = "RunModifiers::is_neutral")]
+    pub modifiers: RunModifiers,
 }
 
 impl Default for RunConfiguration {
@@ -59,6 +63,7 @@ impl Default for RunConfiguration {
                 patterns: vec![],
             }],
             passives: vec![],
+            modifiers: RunModifiers::default(),
         }
     }
 }
@@ -134,6 +139,7 @@ pub fn validate_configuration(world: &World, config: &RunConfiguration) -> Resul
             return Err(format!("Magick Circle accepts up to {maximum_patterns} explicit patterns, or an empty default list."));
         }
     }
+    config.modifiers.validate()?;
     let mut passives = HashSet::new();
     for item in &config.passives {
         if !passives.insert(item.kind) {

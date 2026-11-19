@@ -58,6 +58,7 @@ pub fn handle_damage(
     players: Query<(), With<crate::components::Player>>,
     positions: Query<&Transform>,
     mut applied: MessageWriter<DamageApplied>,
+    run: Option<Res<crate::setup::ActiveRunConfig>>,
     #[cfg(feature = "dev-tools")] debug: Res<crate::dev_tools::DebugSession>,
     #[cfg(feature = "dev-tools")] player_query: Query<(), With<crate::components::Player>>,
 ) {
@@ -83,12 +84,17 @@ pub fn handle_damage(
             cooldown.time = current_time;
         }
 
+        let is_player = players.contains(event.target);
+        let amount = match &run {
+            Some(run) if is_player => run.0.modifiers.damage_taken(event.amount),
+            _ => event.amount,
+        };
         let effective_damage = if let Some(protection) = protection {
-            let reduced = (event.amount as f32 * (1.0 - protection.damage_reduction)) as i32;
+            let reduced = (amount as f32 * (1.0 - protection.damage_reduction)) as i32;
             // Protection reduces positive damage but never grants immunity.
             reduced.max(1)
         } else {
-            event.amount
+            amount
         };
 
         let removed = effective_damage.min(health.current).max(0) as u64;
@@ -100,14 +106,14 @@ pub fn handle_damage(
                 telemetry.record_weapon(weapon.0, removed);
             }
         }
-        if players.contains(event.target) {
+        if is_player {
             telemetry.damage_taken = telemetry.damage_taken.saturating_add(removed);
         }
         health.current -= effective_damage;
         applied.write(DamageApplied {
             target: event.target,
             amount: removed,
-            is_player: players.contains(event.target),
+            is_player,
             position: positions
                 .get(event.target)
                 .map_or(Vec2::ZERO, |t| t.translation.truncate()),
