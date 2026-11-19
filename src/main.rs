@@ -25,6 +25,7 @@ mod physics;
 mod profile;
 mod resources;
 mod run;
+mod run_modifiers;
 mod setup;
 mod storage;
 mod systems;
@@ -141,6 +142,7 @@ impl Plugin for SurvivorsGamePlugin {
                 profile::ProfilePlugin,
                 expedition::ExpeditionPlugin,
                 estate::EstatePlugin,
+                run_modifiers::RunModifiersPlugin,
             ))
             // Startup systems
             .add_systems(

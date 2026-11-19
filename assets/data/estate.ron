@@ -15,44 +15,138 @@
     stations: [
         (kind: ExpeditionTable, name: "Map room", position: (-90.0, 215.0)),
         (kind: Workshop, name: "Workshop", position: (110.0, 215.0)),
+        (kind: Provisioner, name: "Provisioner's counter", position: (450.0, -40.0)),
+        (kind: Altar, name: "Chapel altar", position: (-430.0, -215.0)),
     ],
-    // One-time improvements built at the workshop. Prices are provisional.
-    // Effects: UnlockWeapon(<weapon id>) or StartingPassive(<passive kind>).
+    // Lasting improvements built at the workshop, one rank at a time. Each entry
+    // in `ranks` is the price of that rank. `requires` names upgrades listed
+    // earlier that must be built first.
+    // Effects: UnlockWeapon(<weapon id>) (one rank), StartingPassive(<passive
+    // kind>) (one level per rank), HaulBonus(<resource>, <percent per rank>).
+    // Prices are set against the autoplay haul; see design/ESTATE.md.
     upgrades: [
+        (
+            id: "larder",
+            name: "Stocked Larder",
+            description: "Every expedition begins with a Vital Relic, one level per rank.",
+            ranks: [(gold: 10), (gold: 25, essence: 60), (gold: 45, essence: 150)],
+            effect: StartingPassive(max_health),
+        ),
         (
             id: "whetstone",
             name: "Whetstone and Ward",
             description: "Adds the Knife of the Art to the map room's starting weapons.",
-            cost: (essence: 30),
+            ranks: [(essence: 60)],
             effect: UnlockWeapon(knife_of_the_art),
         ),
         (
-            id: "larder",
-            name: "Stocked Larder",
-            description: "Every expedition begins with a Vital Relic.",
-            cost: (gold: 15),
-            effect: StartingPassive(max_health),
+            id: "counting_house",
+            name: "Counting House",
+            description: "Estate expeditions bring home 25% more gold per rank.",
+            ranks: [(gold: 20, essence: 40), (gold: 50, essence: 120)],
+            effect: HaulBonus(gold, 25),
         ),
         (
             id: "bell_frame",
             name: "Bell Frame",
             description: "Adds the Resonant Recitation to the map room's starting weapons.",
-            cost: (gold: 10, essence: 60),
+            ranks: [(gold: 20, essence: 120)],
             effect: UnlockWeapon(resonant_recitation),
+        ),
+        (
+            id: "alembic",
+            name: "Cellar Alembic",
+            description: "Estate expeditions bring home 15% more essence per rank.",
+            ranks: [(essence: 100), (essence: 200, seals: 8), (essence: 320, seals: 16)],
+            requires: ["larder"],
+            effect: HaulBonus(essence, 15),
+        ),
+        (
+            id: "pilgrim_road",
+            name: "Pilgrim's Road",
+            description: "Every expedition begins with Pilgrim's Boots, one level per rank.",
+            ranks: [(seals: 10), (gold: 20, seals: 20)],
+            effect: StartingPassive(move_speed),
         ),
         (
             id: "talisman_press",
             name: "Talisman Press",
             description: "Adds the Planetary Talismans to the map room's starting weapons.",
-            cost: (essence: 60, seals: 1),
+            ranks: [(essence: 120, seals: 12)],
+            requires: ["bell_frame"],
             effect: UnlockWeapon(planetary_talismans),
         ),
         (
-            id: "pilgrim_road",
-            name: "Pilgrim's Road",
-            description: "Every expedition begins with Pilgrim's Boots.",
-            cost: (seals: 2),
-            effect: StartingPassive(move_speed),
+            id: "chapel_bells",
+            name: "Chapel Bells",
+            description: "Every expedition begins with an Hourglass, one level per rank. The bells also teach the Rite of Thorns at the altar.",
+            ranks: [(gold: 30, essence: 160, seals: 15), (gold: 60, essence: 280, seals: 30)],
+            requires: ["bell_frame"],
+            effect: StartingPassive(cooldown),
+        ),
+    ],
+    // Supplies sold by the provisioner for the next expedition only. Two fit
+    // in a pack, and departing uses them up.
+    // Effects: Passive(<passive kind>) adds one level on top of upgrades;
+    // Weapon(<weapon id>) carries a second weapon, or levels up the chosen one.
+    provisions: [
+        (
+            id: "tincture",
+            name: "Bitter Tincture",
+            description: "One more level of Vital Relic for the next expedition.",
+            cost: (gold: 8),
+            effect: Passive(max_health),
+        ),
+        (
+            id: "lodestone",
+            name: "Pocket Lodestone",
+            description: "One more level of Lodestone for the next expedition.",
+            cost: (gold: 6),
+            effect: Passive(pickup_range),
+        ),
+        (
+            id: "quicksilver",
+            name: "Flask of Quicksilver",
+            description: "One more level of Hourglass for the next expedition.",
+            cost: (gold: 10, essence: 15),
+            effect: Passive(cooldown),
+        ),
+        (
+            id: "spare_needles",
+            name: "Spare Needles",
+            description: "Carry the Inscribed Needles as well, or one level higher if they are your starting weapon.",
+            cost: (gold: 12, essence: 20),
+            effect: Weapon(inscribed_needles),
+        ),
+    ],
+    // Rites performed at the chapel altar. One can be prepared at a time; it
+    // is paid for up front and used up by the next expedition.
+    // modifiers: enemy_health_percent and damage_taken_percent, 100 = unchanged.
+    // haul_bonus: extra percent per resource, added to upgrade bonuses.
+    rituals: [
+        (
+            id: "lesser_banishing",
+            name: "Lesser Banishing",
+            description: "Thin the things that wait outside. The road is easier, and you bring back nothing extra.",
+            cost: (gold: 10),
+            modifiers: (enemy_health_percent: 85),
+        ),
+        (
+            id: "vigil_of_ash",
+            name: "Vigil of Ash",
+            description: "Keep watch through the night and call more of them to you.",
+            cost: (essence: 40),
+            modifiers: (enemy_health_percent: 125),
+            haul_bonus: (gold: 20, essence: 40),
+        ),
+        (
+            id: "rite_of_thorns",
+            name: "Rite of Thorns",
+            description: "Open yourself to the road. Everything there grows harder, and so do its rewards.",
+            cost: (seals: 8),
+            requires: ["chapel_bells"],
+            modifiers: (enemy_health_percent: 150, damage_taken_percent: 125),
+            haul_bonus: (gold: 50, essence: 75, seals: 50),
         ),
     ],
     npcs: [
@@ -73,14 +167,14 @@
         (
             id: "provisioner",
             name: "Tobias, Provisioner",
-            position: (540.0, -50.0),
+            position: (580.0, -60.0),
             color: (0.95, 0.80, 0.45),
             lines: [
-                "I can't outfit you yet. The shelves stay bare until trade picks up.",
-                "Come back with gold and we'll talk.",
+                "Tinctures, lodestones, a flask of something quick. All of it for one trip, mind.",
+                "Two things fit in a pack. Buy at the counter, and whatever you carry is spent by the time you're home.",
             ],
             returning_lines: [
-                "Gold already? Hold on to it. I'll have stock worth buying before long.",
+                "Gold spends best on the road. The counter's open.",
             ],
         ),
         (
@@ -94,6 +188,7 @@
             ],
             returning_lines: [
                 "Bosses carry seals. Finish an expedition and you'll bring home more of them.",
+                "The chapel altar still answers, if you pay it. Some rites make the road kinder. Others make it pay.",
             ],
         ),
     ],

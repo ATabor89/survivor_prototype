@@ -9,8 +9,11 @@ you bring home and spends it on upgrades that change later expeditions.
 Choose **Enter the estate** on the title screen. Walk with WASD, press **E** next
 to a villager or station to use it, and **Escape** to back out. The **Map room**
 plans and launches an expedition; its result screen returns you to the estate
-with the haul banked. The **Workshop** spends gold, essence, and seals on
-upgrades that unlock starting weapons or equip every expedition with a passive.
+with the haul banked. The **Workshop** spends gold, essence, and seals on ranked
+upgrades that unlock starting weapons, equip every expedition with passives, or
+raise the haul. The **Provisioner's counter** sells supplies for the next
+expedition, and the **Chapel altar** performs a ritual that makes the next
+expedition harder or easier and changes what it brings home.
 Progress is saved to `save.ron` in the launch directory; delete it to start over.
 
 The rest of the title screen is a sandbox: any weapon, any seed, nothing banked.

@@ -13,6 +13,8 @@ pub enum InteractionKind {
     Talk(usize),
     ExpeditionTable,
     Workshop,
+    Provisioner,
+    Altar,
 }
 
 #[derive(Component)]
@@ -81,5 +83,7 @@ fn interact(
         }
         InteractionKind::ExpeditionTable => next.set(EstateScreen::ExpeditionTable),
         InteractionKind::Workshop => next.set(EstateScreen::Workshop),
+        InteractionKind::Provisioner => next.set(EstateScreen::Provisioner),
+        InteractionKind::Altar => next.set(EstateScreen::Altar),
     }
 }

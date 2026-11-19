@@ -6,11 +6,13 @@
 //!
 //! Everything spawned here is scoped to [`GameState::Estate`] or one of the
 //! [`EstateScreen`] sub-states, so leaving cleans up without bespoke teardown.
+mod altar;
 mod content;
 mod dialogue;
 mod expedition_table;
 mod hud;
 mod interaction;
+mod provisioner;
 mod ui;
 mod workshop;
 mod world;
@@ -34,6 +36,8 @@ pub enum EstateScreen {
     Dialogue,
     ExpeditionTable,
     Workshop,
+    Provisioner,
+    Altar,
 }
 
 /// Choices offered by estate menus, carried by `MenuAction::Estate`.
@@ -42,8 +46,12 @@ pub enum EstateAction {
     SelectStage(usize),
     SelectWeapon(WeaponType),
     Depart,
-    /// Build the upgrade at this index in the estate content.
+    /// Build the next rank of the upgrade at this index in the estate content.
     Build(usize),
+    /// Buy the provision at this index for the next expedition.
+    Buy(usize),
+    /// Perform the ritual at this index for the next expedition.
+    Perform(usize),
     Close,
 }
 
@@ -59,6 +67,8 @@ impl Plugin for EstatePlugin {
                 dialogue::plugin,
                 expedition_table::plugin,
                 workshop::plugin,
+                provisioner::plugin,
+                altar::plugin,
                 hud::plugin,
             ))
             .add_systems(
@@ -87,9 +97,11 @@ fn step_back(
     }
     match screen.get() {
         EstateScreen::Roaming => next_state.set(GameState::MainMenu),
-        EstateScreen::Dialogue | EstateScreen::ExpeditionTable | EstateScreen::Workshop => {
-            next_screen.set(EstateScreen::Roaming);
-        }
+        EstateScreen::Dialogue
+        | EstateScreen::ExpeditionTable
+        | EstateScreen::Workshop
+        | EstateScreen::Provisioner
+        | EstateScreen::Altar => next_screen.set(EstateScreen::Roaming),
     }
 }
 

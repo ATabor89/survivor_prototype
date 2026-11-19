@@ -1,9 +1,9 @@
 //! The workshop: spend what expeditions bring home on lasting improvements.
 use super::content::{EstateContent, UpgradeDefinition};
-use super::ui::{choice_row, heading, readout, spawn_menu};
+use super::ui::{choice_row, heading, readout, set_row_detail, set_text, spawn_menu};
 use super::{EstateAction, EstateScreen};
 use crate::menu::{MenuAction, MenuActivation, MenuItem};
-use crate::profile::Profile;
+use crate::profile::{Profile, Stockpile};
 use bevy::prelude::*;
 
 /// Tags a workshop row with the index of the upgrade it builds.
@@ -28,24 +28,68 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-/// Whether `upgrade` can be built right now, or the reason it cannot.
-pub fn can_build(profile: &Profile, upgrade: &UpgradeDefinition) -> Result<(), String> {
-    if profile.owns(&upgrade.id) {
+/// The price of the next rank of `upgrade` if it can be built right now, or
+/// the reason it cannot.
+pub fn can_build<'a>(
+    estate: &EstateContent,
+    profile: &Profile,
+    upgrade: &'a UpgradeDefinition,
+) -> Result<&'a Stockpile, String> {
+    let Some(cost) = upgrade.next_cost(profile.rank(&upgrade.id)) else {
         return Err(format!("{} is already built.", upgrade.name));
+    };
+    let missing = estate.missing_requirements(&upgrade.requires, profile);
+    if !missing.is_empty() {
+        return Err(format!(
+            "{} requires {} first.",
+            upgrade.name,
+            missing.join(" and ")
+        ));
     }
-    if !profile.stockpile.covers(&upgrade.cost) {
-        return Err(format!("{} needs {}.", upgrade.name, upgrade.cost));
+    if !profile.stockpile.covers(cost) {
+        return Err(format!("{} needs {cost}.", upgrade.name));
     }
-    Ok(())
+    Ok(cost)
 }
 
-/// Pay for `upgrade` and record it as built. A refused attempt leaves the
-/// profile untouched.
-pub fn build(profile: &mut Profile, upgrade: &UpgradeDefinition) -> Result<(), String> {
-    can_build(profile, upgrade)?;
-    profile.stockpile.spend(&upgrade.cost);
-    profile.upgrades.push(upgrade.id.clone());
-    Ok(())
+/// Pay for the next rank of `upgrade` and record it, returning the new rank.
+/// A refused attempt leaves the profile untouched.
+pub fn build(
+    estate: &EstateContent,
+    profile: &mut Profile,
+    upgrade: &UpgradeDefinition,
+) -> Result<u32, String> {
+    let cost = *can_build(estate, profile, upgrade)?;
+    profile.stockpile.spend(&cost);
+    let rank = profile.upgrades.entry(upgrade.id.clone()).or_default();
+    *rank += 1;
+    Ok(*rank)
+}
+
+/// The detail beside an upgrade's row: its next price, or why it cannot be bought.
+pub fn row_detail(
+    estate: &EstateContent,
+    profile: &Profile,
+    upgrade: &UpgradeDefinition,
+) -> String {
+    let built = profile.rank(&upgrade.id);
+    let ranked = upgrade.max_rank() > 1;
+    let Some(cost) = upgrade.next_cost(built) else {
+        return if ranked {
+            format!("Rank {built}/{}", upgrade.max_rank())
+        } else {
+            "Built".to_owned()
+        };
+    };
+    let missing = estate.missing_requirements(&upgrade.requires, profile);
+    if !missing.is_empty() {
+        return format!("Requires {}", missing.join(", "));
+    }
+    if ranked {
+        format!("Rank {}/{}: {cost}", built + 1, upgrade.max_rank())
+    } else {
+        cost.to_string()
+    }
 }
 
 fn spawn_workshop(
@@ -94,10 +138,14 @@ fn handle_choices(
                 };
                 // Checking through a shared reference first means a refused
                 // attempt never marks the profile changed or triggers a save.
-                let attempt =
-                    can_build(&profile, upgrade).and_then(|()| build(&mut profile, upgrade));
+                let attempt = can_build(&estate, &profile, upgrade)
+                    .map(|_| ())
+                    .and_then(|()| build(&estate, &mut profile, upgrade));
                 status.0 = match attempt {
-                    Ok(()) => format!("Built {}.", upgrade.name),
+                    Ok(rank) if upgrade.max_rank() > 1 => {
+                        format!("Built {} rank {rank}.", upgrade.name)
+                    }
+                    Ok(_) => format!("Built {}.", upgrade.name),
                     Err(reason) => reason,
                 };
             }
@@ -106,7 +154,7 @@ fn handle_choices(
     }
 }
 
-/// Each row's detail shows its price until it is built.
+/// Each row's detail shows its next price, or why it cannot be built.
 fn update_rows(
     estate: Res<EstateContent>,
     profile: Res<Profile>,
@@ -117,17 +165,11 @@ fn update_rows(
         let Some(upgrade) = estate.upgrades.get(row.0) else {
             continue;
         };
-        let detail = if profile.owns(&upgrade.id) {
-            "Built".to_owned()
-        } else {
-            upgrade.cost.to_string()
-        };
-        // The detail is the row's second text; see `ui::choice_row`.
-        if let Some(mut text) = children.get(1).and_then(|child| texts.get_mut(*child).ok()) {
-            if text.0 != detail {
-                text.0 = detail;
-            }
-        }
+        set_row_detail(
+            children,
+            &mut texts,
+            &row_detail(&estate, &profile, upgrade),
+        );
     }
 }
 
@@ -148,8 +190,6 @@ fn update_summary(
         profile.stockpile, status.0
     );
     for mut text in &mut summary {
-        if text.0 != value {
-            text.0.clone_from(&value);
-        }
+        set_text(&mut text, &value);
     }
 }
