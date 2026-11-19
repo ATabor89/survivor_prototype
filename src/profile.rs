@@ -5,13 +5,16 @@
 //! Headless harnesses keep it in memory; only the executable names a file.
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const SAVE_PATH: &str = "save.ron";
-pub const PROFILE_VERSION: u32 = 1;
+/// Version 2 records upgrade ranks and what is prepared for the next expedition.
+pub const PROFILE_VERSION: u32 = 2;
 
 /// The kinds of resource an expedition can bring home.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::EnumIter, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     /// Coin found in breakables and treasure.
     Gold,
@@ -41,6 +44,18 @@ pub struct Stockpile {
 }
 
 impl Stockpile {
+    /// `amount` of one resource and nothing else.
+    pub fn of(kind: ResourceKind, amount: u32) -> Self {
+        let mut pile = Self::default();
+        *pile.slot(kind) = amount;
+        pile
+    }
+
+    /// The largest single amount held.
+    pub fn max(&self) -> u32 {
+        self.gold.max(self.essence).max(self.seals)
+    }
+
     pub const fn get(&self, kind: ResourceKind) -> u32 {
         match kind {
             ResourceKind::Gold => self.gold,
@@ -110,9 +125,15 @@ pub struct Profile {
     pub expeditions: u32,
     #[serde(default)]
     pub victories: u32,
-    /// Ids of estate upgrades that have been built; see `estate.ron`.
+    /// Built estate upgrades by id, with the highest rank built; see `estate.ron`.
     #[serde(default)]
-    pub upgrades: Vec<String>,
+    pub upgrades: BTreeMap<String, u32>,
+    /// Provisions bought for the next estate expedition, consumed when it departs.
+    #[serde(default)]
+    pub provisions: Vec<String>,
+    /// The ritual performed for the next estate expedition, consumed when it departs.
+    #[serde(default)]
+    pub ritual: Option<String>,
 }
 
 impl Default for Profile {
@@ -122,25 +143,70 @@ impl Default for Profile {
             stockpile: Stockpile::default(),
             expeditions: 0,
             victories: 0,
-            upgrades: Vec::new(),
+            upgrades: BTreeMap::new(),
+            provisions: Vec::new(),
+            ritual: None,
         }
     }
 }
 
+/// The first saved format: upgrades were one-time purchases listed by id.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfileV1 {
+    #[expect(dead_code, reason = "Checked by the version probe before parsing.")]
+    version: u32,
+    #[serde(default)]
+    stockpile: Stockpile,
+    #[serde(default)]
+    expeditions: u32,
+    #[serde(default)]
+    victories: u32,
+    #[serde(default)]
+    upgrades: Vec<String>,
+}
+
+impl From<ProfileV1> for Profile {
+    fn from(old: ProfileV1) -> Self {
+        Self {
+            stockpile: old.stockpile,
+            expeditions: old.expeditions,
+            victories: old.victories,
+            upgrades: old.upgrades.into_iter().map(|id| (id, 1)).collect(),
+            ..default()
+        }
+    }
+}
+
+/// Only the version, read first to decide how to parse the rest. Other
+/// fields are ignored here and checked by the versioned parse.
+#[derive(Deserialize)]
+struct VersionProbe {
+    version: u32,
+}
+
 impl Profile {
-    pub fn owns(&self, upgrade: &str) -> bool {
-        self.upgrades.iter().any(|owned| owned == upgrade)
+    /// The rank of `upgrade` that has been built; zero when it has not.
+    pub fn rank(&self, upgrade: &str) -> u32 {
+        self.upgrades.get(upgrade).copied().unwrap_or(0)
     }
 
+    pub fn owns(&self, upgrade: &str) -> bool {
+        self.rank(upgrade) > 0
+    }
+
+    /// Parse a save of the current version, upgrading older versions in memory.
     pub fn parse(text: &str) -> Result<Self, String> {
-        let profile: Self = ron::from_str(text).map_err(|error| error.to_string())?;
-        if profile.version != PROFILE_VERSION {
-            return Err(format!(
-                "Unsupported save version {} (expected {PROFILE_VERSION}).",
-                profile.version
-            ));
+        let probe: VersionProbe = ron::from_str(text).map_err(|error| error.to_string())?;
+        match probe.version {
+            1 => ron::from_str::<ProfileV1>(text)
+                .map(Self::from)
+                .map_err(|error| error.to_string()),
+            PROFILE_VERSION => ron::from_str(text).map_err(|error| error.to_string()),
+            other => Err(format!(
+                "Unsupported save version {other} (expected {PROFILE_VERSION} or older)."
+            )),
         }
-        Ok(profile)
     }
 
     /// Load the profile at `path`, or start a new one if there is no file.
@@ -265,7 +331,9 @@ mod tests {
             stockpile: pile(7, 3, 1),
             expeditions: 4,
             victories: 2,
-            upgrades: vec!["armory".into()],
+            upgrades: [("armory".to_owned(), 2)].into(),
+            provisions: vec!["tincture".into()],
+            ritual: Some("vigil".into()),
             ..default()
         };
         crate::storage::write_ron(&profile, &path).unwrap();
@@ -283,9 +351,10 @@ mod tests {
     #[test]
     fn an_unusable_save_is_backed_up_rather_than_lost() {
         for (name, text) in [
-            ("corrupt", "(version: 1, stockpile: (gold: "),
+            ("corrupt", "(version: 2, stockpile: (gold: "),
             ("newer", "(version: 99, stockpile: (gold: 500))"),
-            ("unknown-field", "(version: 1, mystery: 3)"),
+            ("unknown-field", "(version: 2, mystery: 3)"),
+            ("unknown-old-field", "(version: 1, mystery: 3)"),
         ] {
             let path = scratch_file(name);
             std::fs::write(&path, text).unwrap();
@@ -295,14 +364,30 @@ mod tests {
     }
 
     #[test]
-    fn older_saves_without_newer_fields_still_load() {
-        assert_eq!(Profile::parse("(version: 1)").unwrap(), Profile::default());
+    fn saves_without_newer_fields_still_load() {
+        assert_eq!(Profile::parse("(version: 2)").unwrap(), Profile::default());
         assert_eq!(
-            Profile::parse("(version: 1, stockpile: (seals: 2))")
+            Profile::parse("(version: 2, stockpile: (seals: 2))")
                 .unwrap()
                 .stockpile,
             pile(0, 0, 2)
         );
+    }
+
+    #[test]
+    fn first_version_saves_are_upgraded_with_their_upgrades_at_rank_one() {
+        let profile = Profile::parse(
+            "(version: 1, stockpile: (gold: 3), expeditions: 2, victories: 1, upgrades: [\"larder\", \"whetstone\"])",
+        )
+        .unwrap();
+        assert_eq!(profile.version, PROFILE_VERSION);
+        assert_eq!(profile.stockpile, pile(3, 0, 0));
+        assert_eq!((profile.expeditions, profile.victories), (2, 1));
+        assert_eq!(profile.rank("larder"), 1);
+        assert_eq!(profile.rank("whetstone"), 1);
+        assert_eq!(profile.rank("bell_frame"), 0);
+        assert!(profile.provisions.is_empty() && profile.ritual.is_none());
+        assert_eq!(Profile::parse("(version: 1)").unwrap(), Profile::default());
     }
 
     #[test]

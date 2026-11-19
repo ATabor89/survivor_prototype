@@ -3,11 +3,13 @@ use super::content::EstateContent;
 use super::ui::{choice_row, heading, readout, spawn_menu};
 use super::{EstateAction, EstateScreen};
 use crate::content::GameContent;
-use crate::expedition::RunOrigin;
+use crate::expedition::{HaulBonus, RunOrigin};
+use crate::inventory::PassiveCatalog;
 use crate::menu::{MenuAction, MenuActivation};
-use crate::profile::Profile;
-use crate::setup::{RunConfiguration, WeaponLoadout};
-use crate::weapons::WeaponType;
+use crate::profile::{Profile, Stockpile};
+use crate::resources::GameState;
+use crate::setup::RunConfiguration;
+use crate::weapons::{weapon_upgrade::WeaponUpgradeConfig, WeaponType};
 use bevy::prelude::*;
 
 /// The expedition being planned. Kept between visits to the table.
@@ -27,30 +29,38 @@ impl FromWorld for ExpeditionPlan {
 }
 
 impl ExpeditionPlan {
-    /// A fresh level-one run recipe for this plan with a new seed.
+    /// A fresh level-one run recipe for this plan with a new seed, and the
+    /// haul bonus that goes with it.
     ///
-    /// Built estate upgrades shape it: the weapon must be one the estate
-    /// offers, and upgrade-granted passives are included.
-    pub fn recipe(
-        &self,
-        stages: &GameContent,
-        estate: &EstateContent,
-        profile: &Profile,
-    ) -> Option<RunConfiguration> {
+    /// The estate shapes it: the weapon must be one the estate offers, and
+    /// built upgrades, packed provisions, and the prepared ritual are included.
+    pub fn recipe(&self, world: &World) -> Option<(RunConfiguration, Stockpile)> {
+        let estate = world.resource::<EstateContent>();
+        let profile = world.resource::<Profile>();
         if !estate.available_weapons(profile).contains(&self.weapon) {
             return None;
         }
-        Some(RunConfiguration {
-            stage: stages.stages.get(self.stage)?.id.clone(),
+        let upgrades = world.resource::<WeaponUpgradeConfig>();
+        let outfit = estate.outfit(
+            profile,
+            self.weapon,
+            world.resource::<PassiveCatalog>(),
+            |weapon| upgrades.max_level(weapon),
+        );
+        let recipe = RunConfiguration {
+            stage: world
+                .resource::<GameContent>()
+                .stages
+                .get(self.stage)?
+                .id
+                .clone(),
             seed: rand::random(),
-            weapons: vec![WeaponLoadout {
-                weapon: self.weapon,
-                level: 1,
-                patterns: vec![],
-            }],
-            passives: estate.starting_passives(profile),
+            weapons: outfit.weapons,
+            passives: outfit.passives,
+            modifiers: outfit.modifiers,
             ..default()
-        })
+        };
+        Some((recipe, outfit.haul_bonus))
     }
 }
 
@@ -70,6 +80,12 @@ pub fn plugin(app: &mut App) {
             (handle_choices, update_summary)
                 .chain()
                 .run_if(in_state(EstateScreen::ExpeditionTable)),
+        )
+        .add_systems(
+            Update,
+            depart_again.run_if(|state: Res<State<GameState>>| {
+                matches!(state.get(), GameState::Victory | GameState::GameOver)
+            }),
         );
 }
 
@@ -135,28 +151,55 @@ fn handle_choices(
             EstateAction::SelectWeapon(weapon) => plan.weapon = weapon,
             EstateAction::Close => next.set(EstateScreen::Roaming),
             EstateAction::Depart => commands.queue(depart),
-            EstateAction::Build(_) => {}
+            EstateAction::Build(_) | EstateAction::Buy(_) | EstateAction::Perform(_) => {}
         }
     }
 }
 
-/// Start the planned expedition. Starting a run needs the whole world to
-/// validate the recipe, so this runs as a queued command.
+/// "Depart again" on an estate result screen plans a fresh expedition, so
+/// provisions and rituals are never reused for free.
+fn depart_again(mut commands: Commands, mut activations: MessageReader<MenuActivation>) {
+    for activation in activations.read() {
+        if matches!(activation.action, MenuAction::Estate(EstateAction::Depart)) {
+            commands.queue(depart);
+        }
+    }
+}
+
+/// Start the planned expedition and use up what was prepared for it. Starting
+/// a run needs the whole world to validate the recipe, so this runs as a
+/// queued command.
 fn depart(world: &mut World) {
     let plan = *world.resource::<ExpeditionPlan>();
     let result = plan
-        .recipe(
-            world.resource::<GameContent>(),
-            world.resource::<EstateContent>(),
-            world.resource::<Profile>(),
-        )
+        .recipe(world)
         .ok_or_else(|| "That destination or weapon is not available.".to_owned())
-        .and_then(|recipe| crate::setup::start_run(world, recipe));
+        .and_then(|(recipe, bonus)| {
+            crate::setup::start_run(world, recipe)?;
+            Ok(bonus)
+        });
     match result {
-        Ok(()) => *world.resource_mut::<RunOrigin>() = RunOrigin::Estate,
+        Ok(bonus) => {
+            *world.resource_mut::<RunOrigin>() = RunOrigin::Estate;
+            *world.resource_mut::<HaulBonus>() = HaulBonus { percent: bonus };
+            let mut profile = world.resource_mut::<Profile>();
+            if !profile.provisions.is_empty() || profile.ritual.is_some() {
+                profile.provisions.clear();
+                profile.ritual = None;
+            }
+        }
         Err(error) => {
             warn!("Expedition could not start: {error}");
             world.resource_mut::<TableStatus>().0 = error;
+            // From a result screen there is no table to show the reason on.
+            if !matches!(
+                world.resource::<State<GameState>>().get(),
+                GameState::Estate
+            ) {
+                world
+                    .resource_mut::<NextState<GameState>>()
+                    .set(GameState::Estate);
+            }
         }
     }
 }
@@ -178,10 +221,28 @@ fn update_summary(
     let provisions: Vec<_> = estate
         .starting_passives(&profile)
         .iter()
-        .map(|passive| passives.get(passive.kind).name.clone())
+        .map(|passive| format!("{} {}", passives.get(passive.kind).name, passive.level))
         .collect();
     if !provisions.is_empty() {
         value.push_str(&format!("\nEstate provisions: {}", provisions.join(", ")));
+    }
+    let packed = super::provisioner::packed_names(&estate, &profile);
+    if !packed.is_empty() {
+        value.push_str(&format!("\nPacked: {}", packed.join(", ")));
+    }
+    if let Some(ritual) = estate.prepared_ritual(&profile) {
+        value.push_str(&format!(
+            "\nRitual: {}. {}",
+            ritual.name,
+            super::altar::terms(ritual)
+        ));
+    }
+    let bonus = estate.upgrade_haul_bonus(&profile);
+    if bonus != Stockpile::default() {
+        value.push_str(&format!(
+            "\nEstate haul bonus: {}%",
+            super::altar::percent_list(&bonus)
+        ));
     }
     if !status.0.is_empty() {
         value.push('\n');

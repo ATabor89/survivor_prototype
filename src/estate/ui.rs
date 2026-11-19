@@ -137,3 +137,20 @@ pub fn choice_row(
         })
         .id()
 }
+
+/// Replace the detail text of a row made by [`choice_row`], if it changed.
+pub fn set_row_detail(children: &Children, texts: &mut Query<&mut Text>, detail: &str) {
+    // The detail is the row's second text.
+    if let Some(mut text) = children.get(1).and_then(|child| texts.get_mut(*child).ok()) {
+        if text.0 != detail {
+            detail.clone_into(&mut text.0);
+        }
+    }
+}
+
+/// Replace a readout's text, if it changed, so change detection stays quiet.
+pub fn set_text(text: &mut Text, value: &str) {
+    if text.0 != value {
+        value.clone_into(&mut text.0);
+    }
+}

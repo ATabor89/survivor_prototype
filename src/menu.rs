@@ -883,7 +883,14 @@ pub(crate) fn haul_summary(report: &crate::expedition::ExpeditionReport) -> Stri
     } else {
         "sandbox run, not banked"
     };
-    format!("Haul: {} ({destination})", report.haul)
+    if report.bonus == crate::profile::Stockpile::default() {
+        format!("Haul: {} ({destination})", report.haul)
+    } else {
+        format!(
+            "Haul: {} ({destination}; estate bonus {})",
+            report.haul, report.bonus
+        )
+    }
 }
 
 #[expect(
@@ -966,7 +973,10 @@ fn spawn_run_end_menu(
                         let buttons = if report.is_some_and(|report| report.banked) {
                             [
                                 ("Return to estate", MenuAction::ReturnToEstate),
-                                ("Depart again", MenuAction::RestartRun),
+                                (
+                                    "Depart again",
+                                    MenuAction::Estate(crate::estate::EstateAction::Depart),
+                                ),
                                 ("Quit", MenuAction::QuitGame),
                             ]
                         } else {

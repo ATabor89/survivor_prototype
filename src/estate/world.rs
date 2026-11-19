@@ -117,6 +117,14 @@ fn build_estate(
                         InteractionKind::Workshop,
                         format!("Build improvements at the {}", station.name),
                     ),
+                    StationKind::Provisioner => (
+                        InteractionKind::Provisioner,
+                        format!("Buy provisions at the {}", station.name),
+                    ),
+                    StationKind::Altar => (
+                        InteractionKind::Altar,
+                        format!("Prepare a ritual at the {}", station.name),
+                    ),
                 };
                 estate.spawn((
                     Name::new(station.name.clone()),

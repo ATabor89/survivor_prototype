@@ -1,15 +1,17 @@
+use super::altar::AltarSummary;
 use super::content::EstateEffect;
 use super::content::{EstateContent, EMBEDDED_ESTATE};
 use super::dialogue::{ActiveDialogue, DialogueLine};
 use super::expedition_table::ExpeditionPlan;
 use super::hud::{InteractionPrompt, LedgerReadout};
 use super::interaction::{Focus, Interactable, InteractionKind};
+use super::provisioner::ProvisionerSummary;
 use super::workshop::{build, UpgradeRow, WorkshopSummary};
 use super::world::{EstateAvatar, EstateRoot, Npc, AVATAR_RADIUS, AVATAR_SPEED};
 use super::EstateScreen;
 use crate::arena::ArenaRoot;
 use crate::components::Player;
-use crate::expedition::{LastExpedition, RunOrigin};
+use crate::expedition::{HaulBonus, LastExpedition, RunOrigin};
 use crate::menu::{MenuItem, MenuRoot};
 use crate::profile::{Profile, Stockpile};
 use crate::resources::{GameState, GameStats};
@@ -111,11 +113,41 @@ fn open_table(app: &mut App) {
 }
 
 fn open_workshop(app: &mut App) {
-    let workshop = position_of(app, InteractionKind::Workshop);
-    place_avatar(app, workshop + Vec2::new(0.0, -40.0));
+    open_station(app, InteractionKind::Workshop, Vec2::new(0.0, -40.0));
+    assert_eq!(screen(app), EstateScreen::Workshop);
+}
+
+fn open_station(app: &mut App, kind: InteractionKind, offset: Vec2) {
+    let station = position_of(app, kind);
+    place_avatar(app, station + offset);
     key(app, KeyCode::KeyE);
     step(app, 2);
-    assert_eq!(screen(app), EstateScreen::Workshop);
+}
+
+fn upgrade_named(app: &App, id: &str) -> super::content::UpgradeDefinition {
+    app.world()
+        .resource::<EstateContent>()
+        .upgrades
+        .iter()
+        .find(|upgrade| upgrade.id == id)
+        .cloned()
+        .unwrap()
+}
+
+fn grant(app: &mut App, upgrade: &str, rank: u32) {
+    app.world_mut()
+        .resource_mut::<Profile>()
+        .upgrades
+        .insert(upgrade.to_owned(), rank);
+}
+
+/// Leave the table with Depart selected and start the planned expedition.
+fn depart_from_table(app: &mut App) {
+    open_table(app);
+    assert_eq!(selected_label(app), "Depart");
+    key(app, KeyCode::Enter);
+    step(app, 4);
+    assert_eq!(state(app), GameState::Playing);
 }
 
 /// The index and definition of the first upgrade with a matching effect.
@@ -526,21 +558,24 @@ fn the_title_screen_leads_into_the_estate() {
 #[test]
 fn building_spends_exactly_the_cost_once_and_refusals_change_nothing() {
     let app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
     let (_, upgrade) = upgrade_where(&app, |effect| {
         matches!(effect, EstateEffect::UnlockWeapon(_))
     });
+    assert!(upgrade.requires.is_empty());
+    let cost = upgrade.ranks[0];
     let mut profile = Profile::default();
-    let error = build(&mut profile, &upgrade).unwrap_err();
-    assert!(error.contains(&upgrade.cost.to_string()), "{error}");
+    let error = build(&estate, &mut profile, &upgrade).unwrap_err();
+    assert!(error.contains(&cost.to_string()), "{error}");
     assert_eq!(profile, Profile::default());
 
-    profile.stockpile = upgrade.cost;
+    profile.stockpile = cost;
     profile.stockpile.add(&Stockpile {
         gold: 1,
         essence: 2,
         seals: 3,
     });
-    build(&mut profile, &upgrade).unwrap();
+    assert_eq!(build(&estate, &mut profile, &upgrade), Ok(1));
     assert!(profile.owns(&upgrade.id));
     assert_eq!(
         profile.stockpile,
@@ -552,19 +587,23 @@ fn building_spends_exactly_the_cost_once_and_refusals_change_nothing() {
     );
 
     let rich = profile.clone();
-    assert!(build(&mut profile, &upgrade)
+    assert!(build(&estate, &mut profile, &upgrade)
         .unwrap_err()
         .contains("already built"));
     assert_eq!(profile, rich);
 }
 
 #[test]
-fn the_workshop_menu_builds_what_is_affordable_and_explains_what_is_not() {
+fn the_workshop_menu_builds_rank_by_rank_and_explains_refusals() {
     let mut app = estate();
     let first = app.world().resource::<EstateContent>().upgrades[0].clone();
+    assert!(first.max_rank() > 1, "the first bundled upgrade is ranked");
     open_workshop(&mut app);
     assert_eq!(selected_label(&mut app), first.name);
-    assert_eq!(row_detail(&mut app, 0), first.cost.to_string());
+    assert_eq!(
+        row_detail(&mut app, 0),
+        format!("Rank 1/{}: {}", first.max_rank(), first.ranks[0])
+    );
     assert!(text_of::<WorkshopSummary>(&mut app).contains(&first.description));
 
     // Too poor: nothing is built and the reason is shown.
@@ -573,26 +612,78 @@ fn the_workshop_menu_builds_what_is_affordable_and_explains_what_is_not() {
     assert_eq!(*app.world().resource::<Profile>(), Profile::default());
     assert!(text_of::<WorkshopSummary>(&mut app).contains("needs"));
 
-    app.world_mut().resource_mut::<Profile>().stockpile = first.cost;
+    app.world_mut().resource_mut::<Profile>().stockpile = first.ranks[0];
     key(&mut app, KeyCode::Enter);
     step(&mut app, 1);
     let profile = app.world().resource::<Profile>().clone();
-    assert!(profile.owns(&first.id));
+    assert_eq!(profile.rank(&first.id), 1);
     assert_eq!(profile.stockpile, Stockpile::default());
-    assert_eq!(row_detail(&mut app, 0), "Built");
-    assert!(text_of::<WorkshopSummary>(&mut app).contains(&format!("Built {}", first.name)));
+    assert_eq!(
+        row_detail(&mut app, 0),
+        format!("Rank 2/{}: {}", first.max_rank(), first.ranks[1])
+    );
+    assert!(text_of::<WorkshopSummary>(&mut app).contains(&format!("Built {} rank 1", first.name)));
 
-    // A second press cannot charge again.
-    app.world_mut().resource_mut::<Profile>().stockpile = first.cost;
+    // The first rank's price does not buy the second.
+    app.world_mut().resource_mut::<Profile>().stockpile = first.ranks[0];
     key(&mut app, KeyCode::Enter);
     step(&mut app, 1);
-    assert_eq!(app.world().resource::<Profile>().stockpile, first.cost);
-    assert_eq!(app.world().resource::<Profile>().upgrades.len(), 1);
+    assert_eq!(app.world().resource::<Profile>().rank(&first.id), 1);
+    assert_eq!(app.world().resource::<Profile>().stockpile, first.ranks[0]);
+
+    // Paying for every remaining rank fills the upgrade, and then it stops.
+    for rank in 1..first.max_rank() {
+        app.world_mut().resource_mut::<Profile>().stockpile = first.ranks[rank as usize];
+        key(&mut app, KeyCode::Enter);
+        step(&mut app, 1);
+    }
+    assert_eq!(
+        app.world().resource::<Profile>().rank(&first.id),
+        first.max_rank()
+    );
+    assert_eq!(
+        row_detail(&mut app, 0),
+        format!("Rank {0}/{0}", first.max_rank())
+    );
 
     key(&mut app, KeyCode::Escape);
     step(&mut app, 2);
     assert_eq!(screen(&app), EstateScreen::Roaming);
     assert_eq!(count::<UpgradeRow>(&mut app), 0);
+}
+
+#[test]
+fn prerequisites_must_be_built_first() {
+    let mut app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
+    let (index, locked) = estate
+        .upgrades
+        .iter()
+        .cloned()
+        .enumerate()
+        .find(|(_, upgrade)| !upgrade.requires.is_empty())
+        .expect("the bundled estate has an upgrade with a prerequisite");
+    let required = upgrade_named(&app, &locked.requires[0]);
+    let mut profile = Profile::default();
+    profile.stockpile.add(&locked.ranks[0]);
+    let error = build(&estate, &mut profile, &locked).unwrap_err();
+    assert!(error.contains(&required.name), "{error}");
+    assert_eq!(profile.rank(&locked.id), 0);
+
+    open_workshop(&mut app);
+    assert_eq!(
+        row_detail(&mut app, index),
+        format!("Requires {}", required.name)
+    );
+    grant(&mut app, &required.id, 1);
+    step(&mut app, 1);
+    assert_eq!(
+        row_detail(&mut app, index),
+        format!("Rank 1/{}: {}", locked.max_rank(), locked.ranks[0])
+    );
+
+    profile.upgrades.insert(required.id.clone(), 1);
+    assert_eq!(build(&estate, &mut profile, &locked), Ok(1));
 }
 
 #[test]
@@ -609,19 +700,10 @@ fn an_unlocked_weapon_appears_at_the_table_and_can_start_an_expedition() {
         .available_weapons(app.world().resource::<Profile>())
         .contains(&weapon));
     // Without the upgrade the weapon cannot be smuggled into a plan.
-    let stages = app
-        .world()
-        .resource::<crate::content::GameContent>()
-        .clone();
     let plan = ExpeditionPlan { stage: 0, weapon };
-    assert!(plan
-        .recipe(&stages, &content, app.world().resource::<Profile>())
-        .is_none());
+    assert!(plan.recipe(app.world()).is_none());
 
-    app.world_mut()
-        .resource_mut::<Profile>()
-        .upgrades
-        .push(upgrade.id);
+    grant(&mut app, &upgrade.id, 1);
     open_table(&mut app);
     // Depart sits below the weapons; the newly unlocked one is listed last.
     key(&mut app, KeyCode::ArrowUp);
@@ -651,21 +733,17 @@ fn a_starting_passive_upgrade_equips_estate_expeditions_only() {
     let EstateEffect::StartingPassive(kind) = upgrade.effect else {
         unreachable!()
     };
-    app.world_mut()
-        .resource_mut::<Profile>()
-        .upgrades
-        .push(upgrade.id);
-    open_table(&mut app);
-    key(&mut app, KeyCode::Enter);
-    step(&mut app, 4);
-    assert_eq!(state(&app), GameState::Playing);
+    assert!(upgrade.max_rank() >= 2);
+    grant(&mut app, &upgrade.id, 2);
+    depart_from_table(&mut app);
     let player = crate::tests::player(&mut app);
     assert_eq!(
         app.world()
             .get::<PassiveInventory>(player)
             .unwrap()
             .level(kind),
-        1
+        2,
+        "each rank is one level"
     );
 
     // The sandbox recipe is untouched by estate progress.
@@ -697,7 +775,9 @@ fn upgrade_definitions_are_validated() {
     };
     let workshop = ", (kind: Workshop, name: \"Bench\", position: (0.0, -100.0))";
     let upgrade = |id: &str, cost: &str, effect: &str| {
-        format!("(id: \"{id}\", name: \"N\", description: \"D\", cost: {cost}, effect: {effect}),")
+        format!(
+            "(id: \"{id}\", name: \"N\", description: \"D\", ranks: [{cost}], effect: {effect}),"
+        )
     };
     let knife = upgrade("a", "(gold: 1)", "UnlockWeapon(knife_of_the_art)");
     EstateContent::parse(&estate(workshop, &knife)).unwrap();
@@ -708,6 +788,29 @@ fn upgrade_definitions_are_validated() {
             workshop,
             upgrade("a", "()", "UnlockWeapon(knife_of_the_art)"),
             "cost something",
+        ),
+        (
+            workshop,
+            upgrade("a", "(gold: 1), (gold: 2)", "UnlockWeapon(knife_of_the_art)"),
+            "one rank",
+        ),
+        (
+            workshop,
+            upgrade("a", "(gold: 1)", "HaulBonus(gold, 0)"),
+            "positive haul bonus",
+        ),
+        (
+            workshop,
+            upgrade("a", "(gold: 1), (gold: 1), (gold: 1)", "HaulBonus(gold, 90)"),
+            "more than 200%",
+        ),
+        (
+            workshop,
+            format!(
+                "(id: \"a\", name: \"N\", description: \"D\", ranks: [(gold: 1)], requires: [\"b\"], effect: HaulBonus(gold, 5)),{}",
+                upgrade("b", "(gold: 1)", "HaulBonus(essence, 5)")
+            ),
+            "listed before it",
         ),
         (
             workshop,
@@ -726,5 +829,343 @@ fn upgrade_definitions_are_validated() {
     ] {
         let error = EstateContent::parse(&estate(stations, &upgrades)).unwrap_err();
         assert!(error.contains(reason), "{upgrades}: {error}");
+    }
+}
+
+#[test]
+fn authored_ranks_and_provisions_fit_within_passive_and_weapon_levels() {
+    let app = estate();
+    let estate = app.world().resource::<EstateContent>();
+    let catalog = app.world().resource::<crate::inventory::PassiveCatalog>();
+    for upgrade in &estate.upgrades {
+        if let EstateEffect::StartingPassive(kind) = upgrade.effect {
+            // Leave room for a provision on top of a fully built upgrade.
+            assert!(
+                upgrade.max_rank() < u32::from(catalog.get(kind).max_level()),
+                "{} has more ranks than {kind:?} has levels",
+                upgrade.id
+            );
+        }
+    }
+}
+
+#[test]
+fn provisions_are_packed_up_to_the_limit_and_used_by_the_next_expedition() {
+    use super::content::{ProvisionEffect, PROVISION_SLOTS};
+    use super::provisioner::{buy, can_buy};
+    use crate::inventory::PassiveInventory;
+    let mut app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
+    let passive = estate
+        .provisions
+        .iter()
+        .find(|provision| matches!(provision.effect, ProvisionEffect::Passive(_)))
+        .unwrap()
+        .clone();
+    let weapon = estate
+        .provisions
+        .iter()
+        .find(|provision| matches!(provision.effect, ProvisionEffect::Weapon(_)))
+        .unwrap()
+        .clone();
+    let ProvisionEffect::Passive(kind) = passive.effect else {
+        unreachable!()
+    };
+    let ProvisionEffect::Weapon(extra) = weapon.effect else {
+        unreachable!()
+    };
+
+    let mut profile = Profile::default();
+    assert!(buy(&mut profile, &passive).unwrap_err().contains("needs"));
+    profile.stockpile = Stockpile {
+        gold: 500,
+        essence: 500,
+        seals: 0,
+    };
+    buy(&mut profile, &passive).unwrap();
+    assert!(can_buy(&profile, &passive)
+        .unwrap_err()
+        .contains("already packed"));
+    buy(&mut profile, &weapon).unwrap();
+    assert_eq!(profile.provisions.len(), PROVISION_SLOTS);
+    let third = estate
+        .provisions
+        .iter()
+        .find(|provision| !profile.provisions.contains(&provision.id))
+        .unwrap();
+    let full = profile.clone();
+    assert!(buy(&mut profile, third).unwrap_err().contains("fit"));
+    assert_eq!(profile, full);
+
+    // A passive provision stacks on the matching upgrade, and the weapon is
+    // carried beside the chosen one.
+    let upgrade = estate
+        .upgrades
+        .iter()
+        .find(|upgrade| upgrade.effect == EstateEffect::StartingPassive(kind))
+        .map(|upgrade| upgrade.id.clone());
+    let expected_level = if let Some(id) = upgrade {
+        profile.upgrades.insert(id, 1);
+        2
+    } else {
+        1
+    };
+    *app.world_mut().resource_mut::<Profile>() = profile;
+    let starting = estate.expedition_weapons[0];
+    assert_ne!(starting, extra);
+    depart_from_table(&mut app);
+
+    let player = crate::tests::player(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<PassiveInventory>(player)
+            .unwrap()
+            .level(kind),
+        expected_level
+    );
+    let mut owned: Vec<_> = app
+        .world_mut()
+        .query::<&WeaponMeta>()
+        .iter(app.world())
+        .map(|meta| meta.weapon_type)
+        .collect();
+    owned.sort_by_key(|weapon| weapon.to_string());
+    let mut expected = vec![starting, extra];
+    expected.sort_by_key(|weapon| weapon.to_string());
+    assert_eq!(owned, expected);
+    assert!(app.world().resource::<Profile>().provisions.is_empty());
+}
+
+#[test]
+fn a_weapon_provision_matching_the_starting_weapon_levels_it_up() {
+    use super::content::ProvisionEffect;
+    let mut app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
+    let provision = estate
+        .provisions
+        .iter()
+        .find(|provision| matches!(provision.effect, ProvisionEffect::Weapon(_)))
+        .unwrap();
+    let ProvisionEffect::Weapon(weapon) = provision.effect else {
+        unreachable!()
+    };
+    assert!(estate.expedition_weapons.contains(&weapon));
+    app.world_mut()
+        .resource_mut::<Profile>()
+        .provisions
+        .push(provision.id.clone());
+    app.world_mut().resource_mut::<ExpeditionPlan>().weapon = weapon;
+    let (recipe, _) = app
+        .world()
+        .resource::<ExpeditionPlan>()
+        .recipe(app.world())
+        .unwrap();
+    assert_eq!(recipe.weapons.len(), 1);
+    assert_eq!(recipe.weapons[0].level, 2);
+}
+
+#[test]
+fn the_provisioner_and_altar_menus_open_from_their_stations() {
+    let mut app = estate();
+    open_station(
+        &mut app,
+        InteractionKind::Provisioner,
+        Vec2::new(0.0, -40.0),
+    );
+    assert_eq!(screen(&app), EstateScreen::Provisioner);
+    let first = app.world().resource::<EstateContent>().provisions[0].clone();
+    assert_eq!(selected_label(&mut app), first.name);
+    app.world_mut().resource_mut::<Profile>().stockpile = first.cost;
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 1);
+    assert_eq!(app.world().resource::<Profile>().provisions, vec![first.id]);
+    let summary = text_of::<ProvisionerSummary>(&mut app);
+    assert!(
+        summary.contains(&format!("Packed (1/2): {}", first.name)),
+        "{summary}"
+    );
+    key(&mut app, KeyCode::Escape);
+    step(&mut app, 2);
+    assert_eq!(screen(&app), EstateScreen::Roaming);
+
+    open_station(&mut app, InteractionKind::Altar, Vec2::new(0.0, 40.0));
+    assert_eq!(screen(&app), EstateScreen::Altar);
+    let ritual = app.world().resource::<EstateContent>().rituals[0].clone();
+    assert_eq!(selected_label(&mut app), ritual.name);
+    assert!(text_of::<AltarSummary>(&mut app).contains(&super::altar::terms(&ritual)));
+    app.world_mut().resource_mut::<Profile>().stockpile = ritual.cost;
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 1);
+    assert_eq!(app.world().resource::<Profile>().ritual, Some(ritual.id));
+    assert!(text_of::<AltarSummary>(&mut app).contains("prepared for the next expedition"));
+}
+
+#[test]
+fn rituals_are_prepared_one_at_a_time_and_respect_prerequisites() {
+    use super::altar::{can_perform, perform};
+    let app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
+    let open = estate
+        .rituals
+        .iter()
+        .find(|ritual| ritual.requires.is_empty())
+        .unwrap();
+    let locked = estate
+        .rituals
+        .iter()
+        .find(|ritual| !ritual.requires.is_empty())
+        .expect("the bundled estate has a ritual behind an upgrade");
+    let mut profile = Profile {
+        stockpile: Stockpile {
+            gold: 999,
+            essence: 999,
+            seals: 999,
+        },
+        ..default()
+    };
+    let error = can_perform(&estate, &profile, locked).unwrap_err();
+    assert!(error.contains("requires"), "{error}");
+
+    perform(&estate, &mut profile, open).unwrap();
+    let prepared = profile.clone();
+    for ritual in &estate.rituals {
+        assert!(perform(&estate, &mut profile, ritual)
+            .unwrap_err()
+            .contains("already prepared"));
+    }
+    assert_eq!(profile, prepared);
+}
+
+#[test]
+fn a_ritual_shapes_one_expedition_and_its_haul_then_is_spent() {
+    let mut app = estate();
+    let estate = app.world().resource::<EstateContent>().clone();
+    let ritual = estate
+        .rituals
+        .iter()
+        .find(|ritual| ritual.haul_bonus.essence > 0 && ritual.requires.is_empty())
+        .unwrap()
+        .clone();
+    assert!(!ritual.modifiers.is_neutral());
+    app.world_mut().resource_mut::<Profile>().ritual = Some(ritual.id.clone());
+    depart_from_table(&mut app);
+
+    let config = app.world().resource::<ActiveRunConfig>().0.clone();
+    assert_eq!(config.modifiers, ritual.modifiers);
+    assert_eq!(
+        app.world().resource::<HaulBonus>().percent,
+        ritual.haul_bonus
+    );
+    assert_eq!(app.world().resource::<Profile>().ritual, None);
+
+    // Enemies that appear during the run carry the ritual's health.
+    let enemy = app
+        .world_mut()
+        .spawn((
+            crate::components::Enemy {
+                speed: 0.0,
+                experience_value: 0,
+            },
+            crate::components::Health {
+                current: 100,
+                maximum: 100,
+            },
+        ))
+        .id();
+    let health = app.world().get::<crate::components::Health>(enemy).unwrap();
+    let expected = ritual.modifiers.enemy_health(100);
+    assert_eq!((health.current, health.maximum), (expected, expected));
+    app.world_mut().despawn(enemy);
+
+    app.world_mut().resource_mut::<GameStats>().enemies_killed = 100;
+    kill_player(&mut app);
+    let essence = 10 + 10 * ritual.haul_bonus.essence / 100;
+    assert_eq!(app.world().resource::<Profile>().stockpile.essence, essence);
+    let report = app.world().resource::<LastExpedition>().0.clone().unwrap();
+    assert_eq!(report.bonus.essence, essence - 10);
+
+    // "Depart again" plans afresh: the spent ritual does not come back.
+    assert_eq!(selected_label(&mut app), "Return to estate");
+    key(&mut app, KeyCode::ArrowDown);
+    assert_eq!(selected_label(&mut app), "Depart again");
+    key(&mut app, KeyCode::Enter);
+    step(&mut app, 4);
+    assert_eq!(state(&app), GameState::Playing);
+    assert!(app
+        .world()
+        .resource::<ActiveRunConfig>()
+        .0
+        .modifiers
+        .is_neutral());
+    assert_eq!(
+        app.world().resource::<HaulBonus>().percent,
+        Stockpile::default()
+    );
+}
+
+#[test]
+fn haul_bonus_upgrades_add_to_estate_expeditions_only() {
+    let mut app = estate();
+    let (_, upgrade) = upgrade_where(&app, |effect| {
+        matches!(
+            effect,
+            EstateEffect::HaulBonus(crate::profile::ResourceKind::Gold, _)
+        )
+    });
+    let EstateEffect::HaulBonus(_, percent) = upgrade.effect else {
+        unreachable!()
+    };
+    grant(&mut app, &upgrade.id, 2);
+    depart_from_table(&mut app);
+    app.world_mut().resource_mut::<GameStats>().gold = 40;
+    kill_player(&mut app);
+    assert_eq!(
+        app.world().resource::<Profile>().stockpile.gold,
+        40 + 40 * percent * 2 / 100
+    );
+}
+
+#[test]
+fn provision_and_ritual_definitions_are_validated() {
+    let estate = |stations: &str, body: &str| {
+        format!(
+            "(half_size: (400.0, 300.0), spawn: (0.0, 0.0), expedition_weapons: [magick_circle], \
+             stations: [(kind: ExpeditionTable, name: \"Table\", position: (0.0, 100.0)){stations}], {body})"
+        )
+    };
+    let shop = ", (kind: Provisioner, name: \"Shop\", position: (0.0, -100.0))";
+    let altar = ", (kind: Altar, name: \"Altar\", position: (100.0, -100.0))";
+    let provision = |cost: &str| {
+        format!(
+            "provisions: [(id: \"p\", name: \"P\", description: \"D\", cost: {cost}, effect: Passive(cooldown))]"
+        )
+    };
+    let ritual = |extra: &str| {
+        format!("rituals: [(id: \"r\", name: \"R\", description: \"D\", cost: (gold: 1){extra})]")
+    };
+    EstateContent::parse(&estate(shop, &provision("(gold: 1)"))).unwrap();
+    EstateContent::parse(&estate(
+        altar,
+        &ritual(", modifiers: (enemy_health_percent: 120)"),
+    ))
+    .unwrap();
+    for (stations, body, reason) in [
+        ("", provision("(gold: 1)"), "Provisioner station"),
+        (shop, provision("()"), "cost something"),
+        ("", ritual(", haul_bonus: (gold: 5)"), "Altar station"),
+        (altar, ritual(""), "change the run"),
+        (
+            altar,
+            ritual(", modifiers: (damage_taken_percent: 900)"),
+            "between",
+        ),
+        (
+            altar,
+            ritual(", requires: [\"nowhere\"], haul_bonus: (gold: 5)"),
+            "unknown upgrade",
+        ),
+    ] {
+        let error = EstateContent::parse(&estate(stations, &body)).unwrap_err();
+        assert!(error.contains(reason), "{body}: {error}");
     }
 }
